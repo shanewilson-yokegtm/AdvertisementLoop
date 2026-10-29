@@ -1,0 +1,27 @@
+{
+  "name": "yoke-ad-studio",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Yoke Ad Studio: idea -> branded ad -> shared Library -> feedback -> next version.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node supabase/tests/schema.test.mjs"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.118.0",
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.2.17",
+    "@types/node": "20.16.11",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "5.6.3"
+  }
+}
