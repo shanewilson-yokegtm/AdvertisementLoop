@@ -423,35 +423,35 @@ SPOTS.pipeline = {
 };
 
 // ---------- Spot 4: The rainbow repair job ----------
+// v2 (job 6b3d0a2e): no kicker, 8s of the cursor chasing pieces back in while more keep breaking out.
+// The rainbow never collapses; it's a fight the whole time. Typed end line.
+const REPAIR_CHUNKS = [ // band, s0, s1, out direction (tilt), breaks at, fixed at (99 = never)
+  [0, 0.62, 0.80, 1, 0.5, 1.6], [1, 0.14, 0.34, -1, 1.1, 2.4], [3, 0.55, 0.75, 1, 1.9, 3.1], [2, 0.30, 0.48, -1, 2.6, 3.8],
+  [0, 0.12, 0.30, -1, 3.2, 4.5], [4, 0.40, 0.62, 1, 3.7, 5.1], [1, 0.70, 0.88, 1, 4.4, 5.7], [2, 0.78, 0.95, 1, 4.9, 6.3],
+  [3, 0.10, 0.28, -1, 5.4, 6.9], [0, 0.42, 0.58, 1, 5.9, 7.5], [4, 0.75, 0.92, 1, 6.5, 99], [1, 0.40, 0.55, -1, 7.1, 99],
+].map(([band, s0, s1, out, tb, tf]) => ({ band, s0, s1, out, tb, tf }));
 SPOTS.repair = {
-  headline: 'Another day fixing workflows.', kicker: KICK, cut: 4.0, total: 7.0,
+  headline: 'Another day fixing workflows.', kicker: null, cut: 8.0, total: 11.0,
+  endCard: { type: { start: 0.35, dur: 1.7 }, buttonAt: 2.25 },
   draw(ctx, L, R, t) {
-    const k = R.k, cx = L.W / 2, top = R.top;
-    const A = { band: 0, s0: 0.6, s1: 0.8, out: 1 }, B = { band: 1, s0: 0.14, s1: 0.34, out: -1 };
-    const aOut = clamp((t - 0.45) / 0.35) - smooth((t - 1.45) / 0.4); // breaks, then pushed back
-    const bOut = smooth((t - 2.0) / 0.4);
-    const collapse = smooth((t - 2.85) / 0.75);
-    const pieceXf = (pts, b, chunk, amt) => {
-      // rigid transform of a chunk: slide out along its outward normal and drop, with a tilt
-      const mid = pts[Math.floor(pts.length / 2)]; const len = Math.hypot(mid.x, mid.y) || 1;
-      const nx = mid.x / len, ny = mid.y / len;
-      const dx = nx * 90 * k * amt, dy = ny * 60 * k * amt + 70 * k * amt * amt;
-      const rot = 0.35 * amt * chunk.out;
-      return pts.map(p => { const x = p.x - mid.x, y = p.y - mid.y; return { x: mid.x + x * Math.cos(rot) - y * Math.sin(rot) + dx, y: mid.y + x * Math.sin(rot) + y * Math.cos(rot) + dy, s: p.s }; });
+    const k = R.k, cx = L.W / 2;
+    // how far out a chunk is: pops out, keeps sagging while it waits, snaps back when the cursor pushes it
+    const amtOf = c => {
+      const rise = ease(clamp((t - c.tb) / 0.35));
+      const sag = 1 + 0.35 * smooth((t - c.tb - 0.35) / 1.4);
+      const back = 1 - smooth((t - c.tf) / 0.3);
+      return rise * sag * back;
     };
-    // collapse: every piece slumps toward the floor and spreads outward
-    const slump = (pts, b, idx) => pts.map(p => {
-      const hgt = -p.y, hn = clamp(hgt / top); const e = collapse;
-      const fall = hgt * e * (0.78 + 0.1 * Math.sin(idx * 1.7));
-      return { x: p.x * (1 + e * 0.35 * (1 - hn * 0.3)) + Math.sin(idx * 2.3) * 14 * k * e, y: p.y + fall, s: p.s };
-    });
-    let pieces = [];
+    const midOf = c => { const b = R.bands[c.band], s = (c.s0 + c.s1) / 2; return b.pts.reduce((a, q) => Math.abs(q.s - s) < Math.abs(a.s - s) ? q : a); };
+    const offsetOf = (c, amt) => { const m = midOf(c), len = Math.hypot(m.x, m.y) || 1; return { dx: m.x / len * 120 * k * amt, dy: m.y / len * 80 * k * amt + 95 * k * amt * amt, m }; };
+    const pieceXf = (pts, c, amt) => {
+      const { dx, dy, m } = offsetOf(c, amt); const rot = 0.35 * amt * c.out;
+      return pts.map(p => { const x = p.x - m.x, y = p.y - m.y; return { x: m.x + x * Math.cos(rot) - y * Math.sin(rot) + dx, y: m.y + x * Math.sin(rot) + y * Math.cos(rot) + dy, s: p.s }; });
+    };
+    const pieces = [];
     R.bands.forEach((b, bi) => {
-      const cuts = [0, 0.25, 0.5, 0.75, 1];
-      const chunks = [A, B].filter(c => c.band === bi);
-      let bounds = [0, 1];
-      if (collapse > 0) bounds = cuts;
-      chunks.forEach(c => { bounds.push(c.s0, c.s1); });
+      const chunks = REPAIR_CHUNKS.filter(c => c.band === bi && amtOf(c) > 0.001);
+      let bounds = [0, 1]; chunks.forEach(c => bounds.push(c.s0, c.s1));
       bounds = [...new Set(bounds)].sort((a, c) => a - c);
       for (let j = 0; j < bounds.length - 1; j++) {
         const s0 = bounds[j], s1 = bounds[j + 1];
@@ -459,28 +459,32 @@ SPOTS.repair = {
         if (s0 === 0) pts = [b.pts[0], ...pts]; if (s1 === 1) pts = [...pts, b.pts[b.pts.length - 1]];
         if (pts.length < 2) continue;
         const ch = chunks.find(c => Math.abs(c.s0 - s0) < 1e-6 && Math.abs(c.s1 - s1) < 1e-6);
-        if (ch) { const amt = ch === A ? aOut : bOut; if (amt > 0) pts = pieceXf(pts, b, ch, amt); }
-        if (collapse > 0) pts = slump(pts, b, bi * 7 + j);
+        if (ch) pts = pieceXf(pts, ch, amtOf(ch));
         pieces.push({ pts, b, seed: bi * 13 + j });
       }
     });
-    const all = pieces.flatMap(p => p.pts); const minX = Math.min(...all.map(p => p.x)), maxX = Math.max(...all.map(p => p.x));
-    contactShadow(ctx, cx + (minX + maxX) / 2, L.ground, (maxX - minX) / 2 + R.w / 2);
+    contactShadow(ctx, cx, L.ground, R.top + R.w * 0.5);
     ctx.save(); ctx.beginPath(); ctx.rect(0, 0, L.W, L.ground + 3); ctx.clip();
     pieces.forEach(pc => drawTube(ctx, L.W, L.H, pc.pts.map(p => ({ x: cx + p.x, y: L.ground + p.y, w: pc.b.w })), pc.b.color, pc.seed));
     ctx.restore();
-    // cursor path
-    const midOf = (ch, amt) => { const b = R.bands[ch.band]; const p = b.pts.reduce((a, q) => Math.abs(q.s - (ch.s0 + ch.s1) / 2) < Math.abs(a.s - (ch.s0 + ch.s1) / 2) ? q : a); return { x: cx + p.x, y: L.ground + p.y }; };
-    const pa = midOf(A), pb = midOf(B);
-    const aOutPos = (amt) => ({ x: pa.x + (pa.x - cx) / top * 90 * k * amt + 10, y: pa.y + 60 * k * amt * (pa.y - L.ground) / top + 70 * k * amt * amt + 10 });
-    const start = { x: L.W + 80, y: L.ground + 120 * k };
-    let cur;
-    if (t < 0.8) cur = start;
-    else if (t < 1.4) cur = { x: lerp(start.x, aOutPos(1).x + 40 * k, ease((t - 0.8) / 0.6)), y: lerp(start.y, aOutPos(1).y + 30 * k, ease((t - 0.8) / 0.6)) };
-    else if (t < 1.85) { const amt = 1 - smooth((t - 1.45) / 0.4); const q = aOutPos(amt); cur = { x: q.x + 40 * k, y: q.y + 30 * k }; }
-    else if (t < 2.25) { const q = aOutPos(0); cur = { x: q.x + 40 * k, y: q.y + 30 * k }; }
-    else { const q = aOutPos(0); const u = ease((t - 2.25) / 0.65); cur = { x: lerp(q.x + 40 * k, pb.x - 30 * k, u), y: lerp(q.y + 30 * k, pb.y + 40 * k, u) - Math.sin(u * Math.PI) * 120 * k }; }
-    const pressing = t > 1.45 && t < 1.85 ? 1 : 0;
+    // cursor: chases each broken piece in the order it was fixed, rides it back in, then rushes to the next
+    const tip = (c, amt) => { const { dx, dy, m } = offsetOf(c, amt); return { x: cx + m.x + dx + 22 * k, y: L.ground + m.y + dy + 16 * k }; };
+    const fixes = REPAIR_CHUNKS.filter(c => c.tf < 50);
+    const pending = REPAIR_CHUNKS.filter(c => c.tf > 50);
+    let cur = { x: L.W + 80, y: L.ground + 140 * k }, pressing = 0, prevEnd = { t: 0.6, p: cur };
+    for (const c of [...fixes, ...pending]) {
+      const tArrive = c.tf < 50 ? c.tf - 0.05 : Math.max(prevEnd.t + 0.55, c.tb + 0.45);
+      if (t < prevEnd.t) { cur = prevEnd.p; break; }
+      if (t < tArrive) {
+        const u = ease((t - prevEnd.t) / (tArrive - prevEnd.t)), q = tip(c, amtOf(c));
+        cur = { x: lerp(prevEnd.p.x, q.x, u), y: lerp(prevEnd.p.y, q.y, u) - Math.sin(u * Math.PI) * 90 * k };
+        break;
+      }
+      if (c.tf > 50) { cur = tip(c, amtOf(c)); break; }
+      const tEnd = c.tf + 0.32;
+      if (t < tEnd) { cur = tip(c, amtOf(c)); pressing = 1; break; }
+      prevEnd = { t: tEnd, p: tip(c, 0) }; cur = prevEnd.p;
+    }
     drawCursor(ctx, cur.x, cur.y, k, pressing);
   },
 };
