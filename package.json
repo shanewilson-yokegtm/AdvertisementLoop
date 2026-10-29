@@ -8,7 +8,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node supabase/tests/schema.test.mjs && node --test supabase/tests/rollout.test.mjs"
+    "test": "node supabase/tests/schema.test.mjs && node supabase/tests/ownership.test.mjs && node --test supabase/tests/rollout.test.mjs"
   },
   "dependencies": {
     "@higgsfield/client": "^0.2.6",

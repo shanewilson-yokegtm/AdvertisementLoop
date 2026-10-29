@@ -32,6 +32,7 @@ await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collabo
 await db.exec(readFileSync(path.join(here, '../migrations/20261029191333_voice_comments.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029192856_revision_jobs.sql'), 'utf8').replace(/^alter publication.*$/m, ''));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029194145_reject_cancels_revisions.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029210000_ownership_processing.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
@@ -97,15 +98,13 @@ await allowed('admin approves', SHANE, `insert into reviews(version_id,status,re
 ok('review by bound to approver', (await db.query(`select reviewer from reviews`)).rows[0].reviewer === SHANE);
 await allowed('admin changes decision', SHANE, `update reviews set status='changes', note='Shorter' where version_id='ast_t_v1'`);
 ok('review history kept', (await db.query(`select count(*)::int n from review_history`)).rows[0].n === 2);
-{ const j = (await db.query(`select asset_id, note, state, requested_by from revision_jobs`)).rows;
-  ok('request changes queues one revision job', j.length === 1 && j[0].state === 'queued' && j[0].asset_id === 'ast_t' && j[0].note === 'Shorter' && j[0].requested_by === SHANE); }
-await allowed('more notes before pickup', SHANE, `update reviews set note='Bigger logo' where version_id='ast_t_v1'`);
-{ const j = (await db.query(`select note from revision_jobs`)).rows;
-  ok('extra notes join the queued job', j.length === 1 && j[0].note.includes('Shorter') && j[0].note.includes('Bigger logo')); }
+ok('request changes no longer starts an edit by itself', (await db.query(`select count(*)::int n from revision_jobs`)).rows[0].n === 0);
+await db.exec(`insert into revision_jobs(asset_id,version_id,note) values ('ast_t','ast_t_v1','legacy queued job')`);
 await denied('clients cannot create jobs', SHANE, `insert into revision_jobs(asset_id,version_id) values ('ast_t','ast_t_v1')`);
 { await as(SHANE, `update revision_jobs set state='done'`).catch(() => {});
   ok('clients cannot change job state', (await db.query(`select state from revision_jobs`)).rows[0].state === 'queued'); }
-ok('members can read jobs', (await as(VIEW, `select count(*)::int n from revision_jobs`)).rows[0].n === 1);
+ok('owner reads own jobs', (await as(TENG, `select count(*)::int n from revision_jobs`)).rows[0].n === 1);
+ok('viewers cannot read jobs (private working record)', (await as(VIEW, `select count(*)::int n from revision_jobs`)).rows[0].n === 0);
 await as(TENG, `update assets set archived = false where id = 'ast_t'`);
 await allowed('creator rejects an ad', TENG, `update assets set archived = true, archived_note = 'Rejected by Teng' where id = 'ast_t'`);
 { const r = (await db.query(`select j.state, a.archived from revision_jobs j join assets a on a.id = j.asset_id`)).rows; ok('rejecting cancels queued revisions', r[0].state === 'cancelled', JSON.stringify(r)); }
