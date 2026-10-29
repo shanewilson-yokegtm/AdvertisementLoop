@@ -210,9 +210,11 @@ const SPOTS = window.SPOTS = {};
 // Spot 2: Crushed by setup
 SPOTS.setup = {
   // v2 (job 9d00c858): bigger kicker, smaller headline, clay dents and squishes under the panels, typed end line.
-  headline: 'The setup has a setup.', kicker: 'Go-to-market engineering:', kickerScale: 1.0, headScale: 0.72, cut: 4.0, total: 7.0,
+  // v3 (job 7d86aa39): slowed down. Gag plays at 2/3 speed (0-6.0s), cut at 6.0s, 9.0s total.
+  headline: 'The setup has a setup.', kicker: 'Go-to-market engineering:', kickerScale: 1.0, headScale: 0.72, cut: 6.0, total: 9.0,
   endCard: { logoScale: 0.72, type: { start: 0.3, dur: 1.7 }, buttonAt: 0 },
-  draw(ctx, L, R, t) {
+  draw(ctx, L, R, tReal) {
+    const t = tReal / 1.5; // v3: same choreography, 1.5x slower
     const k = R.k, cx = L.W / 2;
     const lands = [1.15, 2.05, 2.95], targets = [0.74, 0.5, 0.17], labels = ['Configure', 'Connect', 'Configure again'];
     // squash amount over time (sticky: fast compression, tiny rebound, no bounce)
