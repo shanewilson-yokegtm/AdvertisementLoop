@@ -31,6 +31,7 @@ await db.exec(migration);
 await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collaborator_review_reliability.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029191333_voice_comments.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029192856_revision_jobs.sql'), 'utf8').replace(/^alter publication.*$/m, ''));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029194145_reject_cancels_revisions.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
@@ -105,6 +106,10 @@ await denied('clients cannot create jobs', SHANE, `insert into revision_jobs(ass
 { await as(SHANE, `update revision_jobs set state='done'`).catch(() => {});
   ok('clients cannot change job state', (await db.query(`select state from revision_jobs`)).rows[0].state === 'queued'); }
 ok('members can read jobs', (await as(VIEW, `select count(*)::int n from revision_jobs`)).rows[0].n === 1);
+await as(TENG, `update assets set archived = false where id = 'ast_t'`);
+await allowed('creator rejects an ad', TENG, `update assets set archived = true, archived_note = 'Rejected by Teng' where id = 'ast_t'`);
+{ const r = (await db.query(`select j.state, a.archived from revision_jobs j join assets a on a.id = j.asset_id`)).rows; ok('rejecting cancels queued revisions', r[0].state === 'cancelled', JSON.stringify(r)); }
+await as(TENG, `update assets set archived = false where id = 'ast_t'`);
 await allowed('share recorded', TENG, `insert into shares(asset_id,version_id,channel,note) values ('ast_t','ast_t_v1','#creative-review',null)`);
 await denied('share cannot be forged', TENG, `insert into shares(asset_id,version_id,channel,shared_by) values ('ast_t','ast_t_v1','#x','${SHANE}')`);
 await as(SHANE, `delete from shares`).catch(() => {});

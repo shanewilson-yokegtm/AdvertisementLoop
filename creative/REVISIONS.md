@@ -59,6 +59,10 @@ The app's storage needs the service role, which this session doesn't have. Use a
 
 ## 5. Record the version
 
+First re-check the job and asset: if the job is `cancelled` or the asset is `archived` (the ad was rejected while you
+worked), stop, leave the uploaded files, and set the job to `cancelled` with message "Ad rejected during revision".
+
+
 ```sql
 insert into public.versions(id, asset_id, version, parent_version_id, file_path, poster_path, content_type, width, height,
   duration_sec, size_bytes, sha256, source, render, copy, qa, revision_note, legacy_creator)

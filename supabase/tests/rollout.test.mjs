@@ -38,14 +38,14 @@ const asset = { id: 'asset', concept_name: 'Test ad', kind: 'static', format: 's
 const member = { user_id: 'shane', role: 'admin' };
 
 function reviewFixture(initial = [v1], query = '') {
-  const writes = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [], revision_jobs: [] };
+  const writes = []; const pushed = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [], revision_jobs: [] };
   let Page;
   const render = () => root.render(React.createElement(Page));
   const mocks = {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
-    'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); } }) },
+    'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); }, push: url => { pushed.push(url); } }) },
     '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {} },
-    '@/lib/supabase/browser': { sb: () => ({ from: table => ({ upsert: async row => { writes.push({ table, ...row }); return { error: null }; } }) }) },
+    '@/lib/supabase/browser': { sb: () => ({ from: table => ({ upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
     '@/components/Shell': { useApp: () => ({ member, toast: () => {} }) },
     '@/components/Media': { Player: ({ v }) => React.createElement('div', { id: 'selected-media' }, v.id) },
     '@/components/Chips': { statusChip: () => null, renderChip: () => null },
@@ -54,7 +54,7 @@ function reviewFixture(initial = [v1], query = '') {
     '@/components/VoiceNote': { useRecorder: () => ({ state: 'idle', sec: 0, take: null, supported: false, start: async () => {}, stop: () => {}, clear: () => {} }), saveVoiceComment: async () => 'c1', RecordControl: () => null },
   };
   Page = source('src/app/a/[id]/page.tsx', mocks).default;
-  return { Page, rows, writes, render };
+  return { Page, rows, writes, render, pushed };
 }
 
 test('realtime upload does not move the media or approval target; explicit selection does', async () => {
@@ -91,6 +91,14 @@ test('request changes needs feedback, then records it on the version being revie
   assert.equal(button('Request changes').disabled, false);
   await act(async () => button('Request changes').click());
   assert.deepEqual(f.writes.map(w => [w.table, w.version_id, w.status, w.note]), [['reviews', v1.id, 'changes', 'Make the logo bigger']]);
+  await finish();
+});
+
+test('reject removes the ad from the Library', async () => {
+  const f = reviewFixture(); await mount(f.Page);
+  await act(async () => button('Reject ad').click());
+  assert.deepEqual(f.writes.map(w => [w.table, w.id, w.archived]), [['assets', 'asset', true]]);
+  assert.deepEqual(f.pushed, ['/']);
   await finish();
 });
 

@@ -43,7 +43,7 @@ export default function Library() {
       : !live.length ? <div className="empty"><h2>No ads yet</h2><Link className="btn primary" href="/create">Create an ad</Link></div>
       : !shown.length ? <div className="empty"><span className="muted">Nothing here</span></div>
       : <div className="grid">{shown.map(card)}</div>}
-    {arch.length ? <details style={{ marginTop: 32 }}><summary className="muted" style={{ cursor: 'pointer', fontWeight: 600 }}>Archived · {arch.length}</summary>
+    {arch.length ? <details style={{ marginTop: 32 }}><summary className="muted" style={{ cursor: 'pointer', fontWeight: 600 }}>Rejected and archived · {arch.length}</summary>
       <p className="muted">Earlier concepts kept for reference.</p><div className="grid">{arch.map(card)}</div></details> : null}
     {up ? <Upload onClose={() => setUp(false)} /> : null}
   </>;

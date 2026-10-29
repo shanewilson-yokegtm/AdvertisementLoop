@@ -66,6 +66,15 @@ function AssetDetail({ id }: { id: string }) {
     } catch (e: any) { toast('Not saved · ' + (e?.message || e)); }
     setBusy(false);
   };
+  // Reject: not worth fixing. The ad leaves the Library (archived, restorable) and queued revisions are cancelled.
+  const reject = async () => {
+    if (revRec.state === 'rec') revRec.stop();
+    setBusy(true);
+    const { error } = await sb().from('assets').update({ archived: true, archived_note: `Rejected by ${member?.display_name || 'a reviewer'}` }).eq('id', a.id);
+    setBusy(false);
+    if (error) { toast('Not saved · ' + error.message); return; }
+    toast(`Rejected · ${a.concept_name} left the Library`); router.push('/');
+  };
   const job = [...jobs.rows].reverse().find((j: any) => j.version_id === v.id) || null;
   const iterate = async () => {
     const { data: ex } = await sb().from('chats').select('id').eq('asset_id', a.id).order('updated_at', { ascending: false }).limit(1);
@@ -109,7 +118,8 @@ function AssetDetail({ id }: { id: string }) {
           <label className="sr" htmlFor="rev-note">What should change</label>
           <textarea id="rev-note" rows={3} placeholder="Talk or type what should change" value={note} onChange={e => setNote(e.target.value)} />
           <div className="row"><button className="btn primary" disabled={busy || revRec.state === 'rec' || !(note.trim() || revRec.take)} onClick={() => review('changes')}>Request changes</button>
-            <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button></div>
+            <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button>
+            {!a.archived ? <button className="btn quiet-danger" disabled={busy} onClick={reject}>Reject ad</button> : null}</div>
           {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}</div> : job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>Feedback</h2>
@@ -154,7 +164,7 @@ function AssetDetail({ id }: { id: string }) {
 
 const JOB_TEXT: Record<string, string> = {
   queued: 'Queued · Claude starts within the hour', working: 'Claude is making the next version',
-  done: 'Next version ready', needs_input: 'Claude needs your input', failed: 'Revision failed',
+  done: 'Next version ready', needs_input: 'Claude needs your input', failed: 'Revision failed', cancelled: 'Cancelled',
 };
 function JobStatus({ job, vs, onOpen }: { job: any; vs: Version[]; onOpen: (id: string) => void }) {
   const out = job.result_version_id ? vs.find(x => x.id === job.result_version_id) : null;
