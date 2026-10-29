@@ -27,7 +27,13 @@ export default function Share({ a, v, onClose }: { a: Asset; v: Version; onClose
       const j = await r.json().catch(() => ({}));
       if (r.status === 503) setSlackOff('Slack isn’t connected to Ad Studio yet.');
       else if (!r.ok) setSlackOff(j.error || 'Couldn’t load Slack channels.');
-      else setChannels(j.channels || []);
+      else {
+        const list: Channel[] = j.channels || []; setChannels(list);
+        // Default: the channel used last on this device, else the only channel the app is in. Always changeable.
+        let last = ''; try { last = localStorage.getItem('shareChannelId') || ''; } catch { /* ignore */ }
+        const pick = list.find(c => c.id === last) || (list.length === 1 ? list[0] : null);
+        if (pick) setChannelId(pick.id);
+      }
     }).catch(() => setSlackOff('Couldn’t load Slack channels.'));
   }, [owner]);
   const record = (ch: string | null, link: string | null) => sb().from('shares').insert({ asset_id: a.id, version_id: v.id, channel: ch, note: question.trim() || null, link, shared_by: member!.user_id });
@@ -40,6 +46,7 @@ export default function Share({ a, v, onClose }: { a: Asset; v: Version; onClose
       const j = await r.json().catch(() => ({}));
       setBusy(false);
       if (!r.ok) { setMsg(j.message || j.error || 'Slack post failed · try again'); return; }
+      try { localStorage.setItem('shareChannelId', channelId); } catch { /* ignore */ }
       const name = channels?.find(c => c.id === channelId)?.name;
       toast(`Posted v${v.version} to #${name || 'channel'} · replies come back here`); onClose();
     }}>
