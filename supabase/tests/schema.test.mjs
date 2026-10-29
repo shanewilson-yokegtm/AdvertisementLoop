@@ -29,7 +29,7 @@ await db.exec(`
 `);
 await db.exec(migration);
 await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collaborator_review_reliability.sql'), 'utf8'));
-await db.exec(readFileSync(path.join(here, '../migrations/20261029190001_voice_comments.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029191333_voice_comments.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
