@@ -85,6 +85,8 @@ Feedback goes to the ad's owner. Nothing runs automatically: comments, Slack rep
 7. `complete <review_id> --rev N --version <new_version_id>` resolves only the applied and dismissed comments. Feedback that arrived after the review started stays pending.
 8. If it can't be finished, run `status <review_id> --rev N --status failed --message "..."`. The last good version and all feedback stay as they were.
 
+If the helper reports `timeout_unknown_outcome`, the step may have gone through: run `get` and check before repeating it.
+
 `rev` changes after every step. Use the latest value from the previous output. A `conflict` means someone else (owner or admin) changed the review or the ad. Reload with `get` and show the person; never force it.
 
 Revert: `revert <asset_id> --from <old_version_id> --latest <current_latest_id>` makes a new version from the old one. History stays.

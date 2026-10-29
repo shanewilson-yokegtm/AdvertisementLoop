@@ -25,7 +25,7 @@ yas_... token from Ad Studio > Connect Claude) from the environment. Never print
 Exit code 0 on success; on failure prints {"error":..., "message":...} and exits 1. Nothing is reported as saved unless
 the API returned it.
 """
-import argparse, hashlib, json, mimetypes, os, struct, sys, urllib.error, urllib.request, uuid, zipfile
+import argparse, hashlib, json, mimetypes, os, socket, struct, sys, urllib.error, urllib.request, uuid, zipfile
 
 TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
          '.webm': 'video/webm', '.svg': 'image/svg+xml', '.html': 'text/html', '.json': 'application/json', '.zip': 'application/zip', '.txt': 'text/plain'}
@@ -59,8 +59,12 @@ def api(method, route, body=None):
     req = urllib.request.Request(f'{base}/{route}', method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={'authorization': f'Bearer {tok}', 'content-type': 'application/json', 'accept': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read() or b'{}')
+    except (TimeoutError, socket.timeout):
+        if method == 'GET':
+            fail('timeout', 'Ad Studio did not answer in 60s. Safe to retry.')
+        fail('timeout_unknown_outcome', f'No answer in 60s to {method} {route}. It may have gone through: run "get" on the asset (or "inbox") to check before retrying. Saves and shares are safe to retry with the same key; review steps will return a conflict if they already happened.')
     except urllib.error.HTTPError as e:
         try: err = json.loads(e.read())
         except Exception: err = {'error': str(e.code)}
