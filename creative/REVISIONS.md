@@ -67,12 +67,12 @@ Commit engine changes to `main` (only files under `creative/`), with a message n
 Use a one-time upload function:
 
 1. Generate a random token in the shell (`openssl rand -hex 24`), keep it in a shell variable only, and take its SHA-256.
-2. Deploy edge function `upload-revision` (`verify_jwt: false`) that accepts `POST` with header `x-upload-token`
+2. Deploy a run-specific edge function named `upload-revision-<8 random hex>` (`verify_jwt: false`; never reuse another run's function, since runs can happen in parallel) that accepts `POST` with header `x-upload-token`
    (compared by SHA-256 to the hash baked into the code) and `x-path`, allows only paths matching
    `^<asset_id>/v<n>-(file\.mp4|poster\.jpg)$` for the asset in this job, uploads to bucket `ad-assets` with
    `SUPABASE_SERVICE_ROLE_KEY`, and returns `{bytes, sha256}`.
 3. Upload the video and a poster JPG. Check the returned sha256 matches.
-4. Immediately redeploy `upload-revision` as `Deno.serve(() => new Response('gone', { status: 410 }))` with
+4. Immediately redeploy your `upload-revision-<hex>` function as `Deno.serve(() => new Response('gone', { status: 410 }))` with
    `verify_jwt: true`. Do this even if an upload failed.
 
 ## 5. Record the version
@@ -123,4 +123,4 @@ Review: https://advertisementloop-eight.vercel.app/a/{asset_id}?v={new_version_i
 
 Review job: `select public.processing_set_status(:processing_id, :rev, 'failed', :message, :processor);` (keeps the last
 valid version and leaves all feedback pending). Legacy job: set it to `failed` or `needs_input` with a short `message`.
-No secrets. Make sure the upload function is back to 410.
+No secrets. Make sure your upload function is back to 410.
