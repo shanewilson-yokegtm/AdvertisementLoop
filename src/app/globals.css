@@ -110,3 +110,5 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:8px 10px
 .recdot{width:12px;height:12px;border-radius:50%;background:#B42318;animation:recpulse 1s ease-in-out infinite}
 @keyframes recpulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.recdot{animation:none}}
+.btn.rec{gap:10px;font-weight:700;min-height:48px;justify-content:center}
+.recdot.still{animation:none}

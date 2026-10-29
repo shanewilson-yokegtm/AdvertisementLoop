@@ -30,6 +30,7 @@ await db.exec(`
 await db.exec(migration);
 await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collaborator_review_reliability.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029191333_voice_comments.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029192856_revision_jobs.sql'), 'utf8').replace(/^alter publication.*$/m, ''));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
@@ -95,6 +96,15 @@ await allowed('admin approves', SHANE, `insert into reviews(version_id,status,re
 ok('review by bound to approver', (await db.query(`select reviewer from reviews`)).rows[0].reviewer === SHANE);
 await allowed('admin changes decision', SHANE, `update reviews set status='changes', note='Shorter' where version_id='ast_t_v1'`);
 ok('review history kept', (await db.query(`select count(*)::int n from review_history`)).rows[0].n === 2);
+{ const j = (await db.query(`select asset_id, note, state, requested_by from revision_jobs`)).rows;
+  ok('request changes queues one revision job', j.length === 1 && j[0].state === 'queued' && j[0].asset_id === 'ast_t' && j[0].note === 'Shorter' && j[0].requested_by === SHANE); }
+await allowed('more notes before pickup', SHANE, `update reviews set note='Bigger logo' where version_id='ast_t_v1'`);
+{ const j = (await db.query(`select note from revision_jobs`)).rows;
+  ok('extra notes join the queued job', j.length === 1 && j[0].note.includes('Shorter') && j[0].note.includes('Bigger logo')); }
+await denied('clients cannot create jobs', SHANE, `insert into revision_jobs(asset_id,version_id) values ('ast_t','ast_t_v1')`);
+{ await as(SHANE, `update revision_jobs set state='done'`).catch(() => {});
+  ok('clients cannot change job state', (await db.query(`select state from revision_jobs`)).rows[0].state === 'queued'); }
+ok('members can read jobs', (await as(VIEW, `select count(*)::int n from revision_jobs`)).rows[0].n === 1);
 await allowed('share recorded', TENG, `insert into shares(asset_id,version_id,channel,note) values ('ast_t','ast_t_v1','#creative-review',null)`);
 await denied('share cannot be forged', TENG, `insert into shares(asset_id,version_id,channel,shared_by) values ('ast_t','ast_t_v1','#x','${SHANE}')`);
 await as(SHANE, `delete from shares`).catch(() => {});

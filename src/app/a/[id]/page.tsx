@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
 import { useRows, useSigned, useMembers, can, fmtDate, fmtSec, fmtBytes, isVideo, FORMATS, KIND_LABEL, type Asset, type Version, type Review, type Comment } from '@/lib/data';
 import { Player } from '@/components/Media';
@@ -10,7 +10,7 @@ import { useApp } from '@/components/Shell';
 import Upload from '@/components/Upload';
 import Share from '@/components/Share';
 import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
-import VoiceNote from '@/components/VoiceNote';
+import { useRecorder, saveVoiceComment, RecordControl } from '@/components/VoiceNote';
 
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +35,13 @@ function AssetDetail({ id }: { id: string }) {
   const v = vs.find(x => x.id === selectedId);
   const urls = useSigned(v ? [v.file_path, v.poster_path] : []);
   const audioUrls = useSigned(comments.rows.map(c => c.audio_path));
+  const jobs = useRows<any>('revision_jobs', { filter: ['asset_id', id], order: 'created_at' });
+  const playhead = () => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return pv ? Math.round(pv.currentTime * 10) / 10 : null; };
+  // Voice is the primary way to review: the live transcript fills the note box, the audio is kept with it.
+  const noteBase = useRef(''); const cmtBase = useRef('');
+  const revRec = useRecorder({ playheadSec: playhead, toast, onText: t => setNote((noteBase.current ? noteBase.current + ' ' : '') + t) });
+  const cmtRec = useRecorder({ playheadSec: playhead, toast, onText: t => setCmt((cmtBase.current ? cmtBase.current + ' ' : '') + t) });
+  const [busy, setBusy] = useState(false);
   const selectVersion = (versionId: string) => {
     setNote(''); setCmt(''); setAtHead(false); setShare(false);
     router.replace(assetVersionPath(id, versionId), { scroll: false });
@@ -47,11 +54,19 @@ function AssetDetail({ id }: { id: string }) {
 
   const review = async (status: 'approved' | 'changes') => {
     if (status === 'approved' && blockedApproval) { toast(blockedApproval); return; }
-    const { error } = await sb().from('reviews').upsert({ version_id: v.id, status, note: note.trim() || null }, { onConflict: 'version_id' });
-    if (error) { toast('Not saved · ' + error.message); return; }
-    if (status === 'changes' && note.trim()) await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: note.trim() });
-    setNote(''); toast(status === 'approved' ? 'Approved' : 'Changes requested');
+    if (revRec.state === 'rec') { toast('Stop the recording first'); return; }
+    setBusy(true);
+    try {
+      // Keep the spoken feedback (audio + transcript) with the version before the decision is recorded.
+      if (note.trim() || revRec.take) await saveVoiceComment(a.id, v.id, revRec.take, note);
+      const { error } = await sb().from('reviews').upsert({ version_id: v.id, status, note: note.trim() || null }, { onConflict: 'version_id' });
+      if (error) throw error;
+      setNote(''); noteBase.current = ''; revRec.clear();
+      toast(status === 'approved' ? 'Approved' : 'Changes requested · Claude will make the next version');
+    } catch (e: any) { toast('Not saved · ' + (e?.message || e)); }
+    setBusy(false);
   };
+  const job = [...jobs.rows].reverse().find((j: any) => j.version_id === v.id) || null;
   const iterate = async () => {
     const { data: ex } = await sb().from('chats').select('id').eq('asset_id', a.id).order('updated_at', { ascending: false }).limit(1);
     if (ex && ex[0]) { router.push(`/create/${ex[0].id}`); return; }
@@ -90,9 +105,12 @@ function AssetDetail({ id }: { id: string }) {
         </div>
         {can(member, 'approver') ? <div className="panel"><div className="row" style={{ justifyContent: 'space-between' }}><h3>Review v{v.version}</h3></div>
           {blockedApproval ? <p className="muted" role="status">{blockedApproval}</p> : null}
-          <textarea rows={2} placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} />
-          <div className="row"><button className="btn primary" disabled={!!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button>
-            <button className="btn" disabled={rev?.status === 'changes' && !note.trim()} onClick={() => review('changes')}>Request changes</button></div></div> : null}
+          <RecordControl r={{ ...revRec, start: () => { noteBase.current = note.trim(); return revRec.start(); } }} label="Record feedback" />
+          <label className="sr" htmlFor="rev-note">What should change</label>
+          <textarea id="rev-note" rows={3} placeholder="Talk or type what should change" value={note} onChange={e => setNote(e.target.value)} />
+          <div className="row"><button className="btn primary" disabled={busy || revRec.state === 'rec' || !(note.trim() || revRec.take)} onClick={() => review('changes')}>Request changes</button>
+            <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button></div>
+          {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}</div> : job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>Feedback</h2>
           {!comments.rows.length ? <div className="muted">No comments yet</div> : comments.rows.map(c => { const cv = vs.find(x => x.id === c.version_id);
@@ -101,15 +119,18 @@ function AssetDetail({ id }: { id: string }) {
               {c.audio_path ? <audio controls preload="none" src={audioUrls[c.audio_path]} style={{ width: '100%' }} aria-label={`Voice note from ${who(c.author, c.legacy_author)}`} /> : null}
               {c.audio_path && c.body === 'Voice note' ? null : <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>}
               {c.status === 'open' && can(member, 'creator') ? <div><button className="btn small" onClick={async () => { const { error } = await sb().from('comments').update({ status: 'dismissed' }).eq('id', c.id); if (error) toast(error.message); }}>Dismiss</button></div> : null}</div>; })}
-          {can(member, 'creator') ? <form className="panel" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t) return;
-              const pv = document.getElementById('pv') as HTMLVideoElement | null;
-              const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null });
-              if (error) toast('Not saved · ' + error.message); else { setCmt(''); toast('Comment added'); } }}>
-            <label className="sr" htmlFor="cmt">Comment</label><textarea id="cmt" rows={2} placeholder="Headline too long on 9:16" value={cmt} onChange={e => setCmt(e.target.value)} />
+          {can(member, 'creator') ? <form className="panel" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
+              if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
+              try {
+                if (cmtRec.take) await saveVoiceComment(a.id, v.id, cmtRec.take, t);
+                else { const pv = document.getElementById('pv') as HTMLVideoElement | null;
+                  const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null }); if (error) throw error; }
+                setCmt(''); cmtBase.current = ''; cmtRec.clear(); toast('Comment added');
+              } catch (err: any) { toast('Not saved · ' + (err?.message || err)); } }}>
+            <RecordControl r={{ ...cmtRec, start: () => { cmtBase.current = cmt.trim(); return cmtRec.start(); } }} label="Record a comment" />
+            <label className="sr" htmlFor="cmt">Comment</label><textarea id="cmt" rows={2} placeholder="Talk or type a comment" value={cmt} onChange={e => setCmt(e.target.value)} />
             <div className="row" style={{ justifyContent: 'space-between' }}>{isVideo(v) ? <label className="row"><input type="checkbox" checked={atHead} onChange={e => setAtHead(e.target.checked)} /> At playhead</label> : <span />}<button className="btn primary">Comment</button></div>
           </form> : null}
-          {can(member, 'creator') ? <VoiceNote assetId={a.id} versionId={v.id} toast={toast}
-            playheadSec={() => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return isVideo(v) && pv ? Math.round(pv.currentTime * 10) / 10 : null; }} /> : null}
         </section>
         <details><summary style={{ cursor: 'pointer', fontWeight: 650 }}>Copy, checks and file</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
@@ -129,4 +150,19 @@ function AssetDetail({ id }: { id: string }) {
     {up ? <Upload asset={a} onClose={() => setUp(false)} /> : null}
     {share ? <Share a={a} v={v} onClose={() => setShare(false)} /> : null}
   </>;
+}
+
+const JOB_TEXT: Record<string, string> = {
+  queued: 'Queued · Claude starts within 15 minutes', working: 'Claude is making the next version',
+  done: 'Next version ready', needs_input: 'Claude needs your input', failed: 'Revision failed',
+};
+function JobStatus({ job, vs, onOpen }: { job: any; vs: Version[]; onOpen: (id: string) => void }) {
+  const out = job.result_version_id ? vs.find(x => x.id === job.result_version_id) : null;
+  return <div className="row" role="status">
+    <span className={'chip ' + (job.state === 'done' ? 'ok' : job.state === 'failed' || job.state === 'needs_input' ? 'warn' : '')}>{JOB_TEXT[job.state] || job.state}</span>
+    {job.state === 'working' && job.claimed_at ? <span className="muted">since {fmtDate(job.claimed_at)}</span> : null}
+    {out ? <button className="btn small" onClick={() => onOpen(out.id)}>View v{out.version}</button> : null}
+    {job.message ? <span className="muted" style={{ flexBasis: '100%' }}>{job.message}</span> : null}
+    {job.session_url && job.state !== 'done' ? <a className="muted" href={job.session_url} target="_blank" rel="noopener">Open Claude session</a> : null}
+  </div>;
 }

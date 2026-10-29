@@ -38,7 +38,7 @@ const asset = { id: 'asset', concept_name: 'Test ad', kind: 'static', format: 's
 const member = { user_id: 'shane', role: 'admin' };
 
 function reviewFixture(initial = [v1], query = '') {
-  const writes = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [] };
+  const writes = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [], revision_jobs: [] };
   let Page;
   const render = () => root.render(React.createElement(Page));
   const mocks = {
@@ -51,7 +51,7 @@ function reviewFixture(initial = [v1], query = '') {
     '@/components/Chips': { statusChip: () => null, renderChip: () => null },
     '@/components/Upload': { __esModule: true, default: () => null },
     '@/components/Share': { __esModule: true, default: () => null },
-    '@/components/VoiceNote': { __esModule: true, default: () => null },
+    '@/components/VoiceNote': { useRecorder: () => ({ state: 'idle', sec: 0, take: null, supported: false, start: async () => {}, stop: () => {}, clear: () => {} }), saveVoiceComment: async () => 'c1', RecordControl: () => null },
   };
   Page = source('src/app/a/[id]/page.tsx', mocks).default;
   return { Page, rows, writes, render };
@@ -80,6 +80,18 @@ test('pending media cannot be approved in the UI', async () => {
   const f = reviewFixture([{ ...v1, file_path: null, render: { state: 'pending' } }]); await mount(f.Page);
   assert.equal(button('Approve').disabled, true); await act(async () => button('Approve').click());
   assert.equal(f.writes.length, 0); await finish();
+});
+
+test('request changes needs feedback, then records it on the version being reviewed', async () => {
+  const f = reviewFixture(); await mount(f.Page);
+  assert.equal(button('Request changes').disabled, true);
+  const box = document.getElementById('rev-note');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  await act(async () => { setter.call(box, 'Make the logo bigger'); box.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  assert.equal(button('Request changes').disabled, false);
+  await act(async () => button('Request changes').click());
+  assert.deepEqual(f.writes.map(w => [w.table, w.version_id, w.status, w.note]), [['reviews', v1.id, 'changes', 'Make the logo bigger']]);
+  await finish();
 });
 
 test('copyable review message includes the version in its URL', () => {
