@@ -8,7 +8,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node supabase/tests/schema.test.mjs && node --test tests/*.test.mjs"
+    "test": "node supabase/tests/schema.test.mjs && node --test supabase/tests/rollout.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",
