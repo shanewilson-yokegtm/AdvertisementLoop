@@ -121,3 +121,5 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:8px 10px
 .seg button:disabled{cursor:default;opacity:.7}
 .proposal{display:flex;flex-direction:column;gap:6px;border-left:3px solid var(--border);padding-left:10px}
 .navcount{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:6px;border-radius:999px;background:#D63A27;color:#fff;font-size:12px;font-weight:700}
+.cmt.decide.apply{border-left:3px solid var(--ok)}
+.cmt.decide.dismiss{opacity:.6}

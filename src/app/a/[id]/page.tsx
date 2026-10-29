@@ -138,14 +138,16 @@ function AssetDetail({ id }: { id: string }) {
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         {manage ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }}
           who={who} audioUrls={audioUrls} toast={toast} onOpen={selectVersion} ownerName={ownerName} /> : null}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>Feedback</h2>
-          {!comments.rows.length ? <div className="muted">No comments yet</div> : comments.rows.map(c => { const cv = vs.find(x => x.id === c.version_id);
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>{manage ? 'Comment history' : 'Feedback'}</h2>
+          {/* Owners decide on open comments above; here they see what was accepted/ignored. Everyone else sees the full thread. */}
+          {(() => { const list = manage ? comments.rows.filter(c => c.status !== 'open') : comments.rows; return !list.length ? <div className="muted">{manage ? 'Nothing decided yet' : 'No comments yet'}</div> : list.map(c => { const cv = vs.find(x => x.id === c.version_id);
             return <div className="cmt" key={c.id}><div className="row"><b>{who(c.author, c.legacy_author)}</b><span className="muted">v{cv?.version ?? '?'}{c.at_sec != null ? ' · at ' + fmtSec(c.at_sec) : ''} · {fmtDate(c.created_at)}</span>
-              {c.status === 'applied' ? <span className="chip ok">Applied{c.applied_in ? ' in v' + (vs.find(x => x.id === c.applied_in)?.version ?? '?') : ''}</span> : c.status === 'dismissed' ? <span className="chip">Dismissed</span> : <span className="chip warn">Open</span>}</div>
+              {c.status === 'applied' ? <span className="chip ok">Accepted{c.applied_in ? ' in v' + (vs.find(x => x.id === c.applied_in)?.version ?? '?') : ''}</span> : c.status === 'dismissed' ? <span className="chip">Ignored</span> : <span className="chip warn">Open</span>}</div>
               {c.audio_path ? <audio controls preload="none" src={audioUrls[c.audio_path]} style={{ width: '100%' }} aria-label={`Voice note from ${who(c.author, c.legacy_author)}`} /> : null}
               {c.audio_path && c.body === 'Voice note' ? null : <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>}
               {c.resolution_note ? <div className="muted">{c.status === 'dismissed' ? 'Reason: ' : 'Note: '}{c.resolution_note}</div> : null}
-              {c.source_link ? <a className="muted" href={c.source_link} target="_blank" rel="noopener">View in Slack</a> : null}</div>; })}
+              {c.deleted_at ? <div className="muted">Deleted in Slack (kept for history)</div> : c.edited_at ? <div className="muted">Edited in Slack</div> : null}
+              {c.source_link ? <a className="muted" href={c.source_link} target="_blank" rel="noopener">View in Slack</a> : null}</div>; }); })()}
           {can(member, 'creator') ? <form className="panel" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
               if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
               try {

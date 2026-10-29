@@ -121,11 +121,17 @@ test('the owner sees Process feedback and can revert an older version', async ()
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-// ---------- Process feedback panel (real component) ----------
+// ---------- Owner feedback: Accept / Ignore, then Make next version (real component) ----------
 function processFixture(proc, comments) {
   const calls = [];
+  const started = { id: 'p-new', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: comments.filter(c => c.status === 'open').map(c => c.id), status: 'reviewing', proposal: {}, decisions: [], rev: 0, history: [] };
   const Panel = source('src/components/Process.tsx', {
-    '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
+    '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => {
+      calls.push({ fn, args });
+      if (fn === 'processing_start') return { data: started, error: null };
+      if (fn === 'processing_save_proposal') return { data: { ...(proc || started), proposal: args.p_proposal, rev: args.p_rev + 1 }, error: null };
+      return { data: { ...(proc || started), status: 'approved' }, error: null };
+    } }) },
     '@/lib/data': { fmtDate: () => '', fmtSec: s => String(s) },
   }).default;
   const props = { a: asset, vs: [v1, v2], comments, proc, reload: () => {}, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, onOpen: () => {}, ownerName: 'Shane' };
@@ -135,41 +141,47 @@ const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng
 const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v2', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '' };
 const cLate = { id: 'c-late', asset_id: 'asset', version_id: 'asset_v2', author: 'henry', body: 'Late idea', status: 'open', created_at: '' };
 const reviewing = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-a', 'c-b'], processor: 'shane', started_via: 'claude', status: 'reviewing',
-  proposal: { summary: 'Two ideas', items: [{ comment_ids: ['c-a'], kind: 'compatible', change: 'Cut headline' }, { comment_ids: ['c-b'], kind: 'conflict', change: 'Pick a CTA' }], draft: { decisions: [{ comment_id: 'c-a', decision: 'apply' }], instructions: 'From Claude' } },
+  proposal: { draft: { decisions: [{ comment_id: 'c-a', decision: 'apply' }], instructions: 'From Claude' } },
   decisions: [], instructions: null, result_version_id: null, message: null, rev: 3, history: [], created_at: '' };
+const radio = (i, label) => [...document.querySelectorAll('[role=radio]')].filter(b => b.textContent === label)[i];
+const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
 
-test('Process feedback with nothing started only offers to open a review', async () => {
+test('Make next version is off until something is accepted; clicking Accept starts and saves the choice', async () => {
   const f = processFixture(null, [cA, cB]); await mount(f.Panel);
-  await act(async () => button('Process feedback').click());
-  assert.deepEqual(f.calls, [{ fn: 'processing_start', args: { p_asset: 'asset', p_via: 'app' } }]);
+  assert.equal(button('Make next version').disabled, true);
+  assert.equal(f.calls.length, 0, 'opening the ad changes nothing');
+  await act(async () => radio(0, 'Accept').click()); await flush();
+  assert.deepEqual(f.calls.map(c => c.fn), ['processing_start', 'processing_save_proposal']);
+  assert.deepEqual(f.calls[1].args.p_proposal.draft.decisions, [{ comment_id: 'c-a', decision: 'apply' }]);
+  assert.equal(button('Make next version').disabled, false);
+  assert.match(document.body.textContent, /1 accepted · 0 ignored · 1 not decided/);
   await finish();
 });
 
-test('a review started in Claude resumes in the app with its proposal and draft decisions', async () => {
+test('choices made in Claude show up in the app', async () => {
   const f = processFixture(reviewing, [cA, cB, cLate]); await mount(f.Panel);
-  assert.match(document.body.textContent, /Cut headline/); assert.match(document.body.textContent, /Needs a choice/);
-  assert.match(document.body.textContent, /started in Claude/);
+  assert.equal(radio(0, 'Accept').getAttribute('aria-checked'), 'true');
   assert.equal(document.getElementById('proc-instr').value, 'From Claude');
-  assert.match(document.body.textContent, /1 new comment arrived after this review started/);
-  assert.match(button('Execute changes · 1').textContent, /Execute changes · 1/);
+  assert.match(document.body.textContent, /1 newer comment came in after you started choosing/);
   await finish();
 });
 
-test('Execute changes sends only the selected decisions, with the review revision', async () => {
+test('Make next version sends only accepted and ignored comments from this round', async () => {
   const f = processFixture(reviewing, [cA, cB, cLate]); await mount(f.Panel);
-  const dismissB = [...document.querySelectorAll('[role=radio]')].filter(b => b.textContent === 'Dismiss')[1];
-  await act(async () => dismissB.click());
-  await act(async () => button('Execute changes · 1').click());
+  await act(async () => radio(1, 'Ignore').click()); await flush();
+  await act(async () => button('Make next version').click()); await flush();
   const call = f.calls.find(c => c.fn === 'processing_approve');
-  assert.equal(call.args.p_rev, 3);
-  assert.deepEqual(call.args.p_decisions.map(d => [d.comment_id, d.decision]), [['c-a', 'apply'], ['c-b', 'dismiss']]);
-  assert.ok(!JSON.stringify(call.args).includes('c-late'), 'late feedback not included');
+  assert.equal(call.args.p_queue_worker, true);
+  assert.deepEqual(call.args.p_decisions.map(d => [d.comment_id, d.decision]).sort(), [['c-a', 'apply'], ['c-b', 'dismiss']]);
+  assert.ok(!JSON.stringify(call.args).includes('c-late'), 'late comment not included');
   await finish();
 });
 
-test('Execute is disabled until something is selected', async () => {
-  const f = processFixture({ ...reviewing, proposal: {} }, [cA, cB]); await mount(f.Panel);
-  assert.equal(button('Execute changes').disabled, true);
+test('after sending, the owner sees it queued and can cancel before Claude starts', async () => {
+  const f = processFixture({ ...reviewing, status: 'approved', decisions: [{ comment_id: 'c-a', decision: 'apply' }] }, [cA, cB]); await mount(f.Panel);
+  assert.match(document.body.textContent, /v3 arrives within the hour/);
+  await act(async () => button('Cancel').click()); await flush();
+  assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();
 });
 
