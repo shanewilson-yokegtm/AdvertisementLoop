@@ -51,7 +51,7 @@ Nothing here uses Rumi or other Yoke production systems.
 
 ## Slack review threads
 
-1. Create a Slack app for the Yoke workspace. Bot scopes: `chat:write`, `channels:history`, `groups:history`, `reactions:read`, `users:read`, `users:read.email`, `channels:read`, `groups:read`.
+1. Create a Slack app for the Yoke workspace. Bot scopes: `chat:write`, `im:write`, `files:write`, `files:read`, `channels:history`, `groups:history`, `reactions:read`, `users:read`, `users:read.email`, `channels:read`, `groups:read`. (`files:*` lets videos post as playable files.)
 2. Event Subscriptions: request URL `https://<app>/api/slack/events`; bot events `message.channels`, `message.groups`, `reaction_added`, `reaction_removed`.
 3. Vercel env: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `APP_URL` (the public app URL).
 4. Invite the app to a test channel. Owners pick the channel when sharing; replies in that thread become comments on the shared version.
