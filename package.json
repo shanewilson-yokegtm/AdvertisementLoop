@@ -11,6 +11,7 @@
     "test": "node supabase/tests/schema.test.mjs && node --test supabase/tests/rollout.test.mjs"
   },
   "dependencies": {
+    "@higgsfield/client": "^0.2.6",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.118.0",
     "next": "16.4.2",
