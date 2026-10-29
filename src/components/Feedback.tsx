@@ -21,7 +21,7 @@ export default function Feedback() {
   const ctx = { screen: path, build: BUILD, viewport: typeof window !== 'undefined' ? `${innerWidth}×${innerHeight}` : '' };
   if (!member) return null;
   return <>
-    <button className="fbfab" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>Suggest · Report bug</button>
+    <button className="fbfab" type="button" aria-haspopup="dialog" aria-label="Report a bug or suggest a change to the Ad Studio app" onClick={() => setOpen(true)}>App bug or idea</button>
     {open ? <div className="modal" role="dialog" aria-modal="true" aria-labelledby="fbT" onKeyDown={e => e.key === 'Escape' && setOpen(false)}>
       <form className="box" onSubmit={async e => {
         e.preventDefault(); if (!text.trim()) { setErr('Add a description'); return; }
@@ -29,13 +29,14 @@ export default function Feedback() {
         const { error } = await sb().from('feedback').insert({ id: id.current, type, body: text.trim().slice(0, 4000), test, context: ctx, error_details: type === 'bug' ? lastErr : null, submitted_by: member.user_id });
         setBusy(false);
         if (error && !/duplicate key/.test(error.message)) { setErr('Not saved · ' + error.message + ' · your text is kept'); return; }
-        setOpen(false); setText(''); setTest(false); toast('Thanks · saved for Shane');
+        setOpen(false); setText(''); setTest(false); toast('Sent to Shane’s Claude');
       }}>
-        <div className="head" style={{ margin: 0 }}><h2 id="fbT">Feedback</h2><button className="btn" type="button" onClick={() => setOpen(false)}>Close</button></div>
+        <div className="head" style={{ margin: 0 }}><h2 id="fbT">Ad Studio app feedback</h2><button className="btn" type="button" onClick={() => setOpen(false)}>Close</button></div>
+        <p className="muted" style={{ margin: 0 }}>For bugs and ideas about the tool itself. It goes to Shane&apos;s Claude to fix in the app. Notes on an ad belong in that ad&apos;s Feedback.</p>
         <div className="seg" role="radiogroup" aria-label="Type">
-          {(['bug', 'suggestion'] as const).map(t => <label key={t}><input type="radio" name="fbType" checked={type === t} onChange={() => setType(t)} /><span>{t === 'bug' ? 'Report a bug' : 'Make a suggestion'}</span></label>)}
+          {(['bug', 'suggestion'] as const).map(t => <label key={t}><input type="radio" name="fbType" checked={type === t} onChange={() => setType(t)} /><span>{t === 'bug' ? 'Something broke' : 'Idea for the app'}</span></label>)}
         </div>
-        <label className="f">What happened, or what would help?<textarea rows={6} maxLength={4000} value={text} onChange={e => setText(e.target.value)} autoFocus /></label>
+        <label className="f">What happened, or what should the app do?<textarea rows={6} maxLength={4000} value={text} onChange={e => setText(e.target.value)} autoFocus /></label>
         <div><h3 style={{ marginBottom: 6 }}>Sent with it</h3>
           <dl className="ctx"><dt>Screen</dt><dd>{ctx.screen}</dd><dt>Build</dt><dd>{ctx.build}</dd><dt>Screen size</dt><dd>{ctx.viewport}</dd><dt>You</dt><dd>{member.display_name}</dd>
             {type === 'bug' && lastErr ? <><dt>Last error</dt><dd>{lastErr.message} ({lastErr.where})</dd></> : null}</dl></div>
