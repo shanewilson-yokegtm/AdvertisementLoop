@@ -101,7 +101,7 @@ function drawStage(ctx, L) {
 }
 
 // kickerScale: kicker size relative to the headline (0.62 default). Per-spot option, see SPOTS.<key>.kickerScale.
-function drawHeadline(ctx, L, text, alpha = 1, kicker = null, kickerScale = 0.62) {
+function drawHeadline(ctx, L, text, alpha = 1, kicker = null, kickerScale = 0.62, headScale = 1) {
   ctx.save(); ctx.globalAlpha = alpha;
   ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   const size = L.W * 0.078;
@@ -110,11 +110,12 @@ function drawHeadline(ctx, L, text, alpha = 1, kicker = null, kickerScale = 0.62
     const kw = ctx.measureText(kicker).width, kMax = L.W - 110;
     if (kw > kMax) { ks = ks * kMax / kw; ctx.font = `600 ${ks}px ${FONT}`; }
     ctx.fillStyle = kickerScale > 0.62 ? C.ink : C.muted;
-    ctx.fillText(kicker, L.W / 2, L.headY - Math.max(size * 1.15, ks * 1.25)); ctx.fillStyle = C.ink;
+    const gap = headScale === 1 ? Math.max(size * 1.15, ks * 1.25) : size * headScale * 1.1 + ks * 0.2;
+    ctx.fillText(kicker, L.W / 2, L.headY - gap); ctx.fillStyle = C.ink;
   }
-  ctx.font = `600 ${size}px ${FONT}`;
+  const hs = size * headScale; ctx.font = `600 ${hs}px ${FONT}`;
   const tw = ctx.measureText(text).width, maxW = L.W - 110;
-  if (tw > maxW) ctx.font = `600 ${size * maxW / tw}px ${FONT}`;
+  if (tw > maxW) ctx.font = `600 ${hs * maxW / tw}px ${FONT}`;
   ctx.fillText(text, L.W / 2, L.headY);
   ctx.restore();
 }
@@ -208,7 +209,9 @@ const SPOTS = window.SPOTS = {};
 
 // Spot 2: Crushed by setup
 SPOTS.setup = {
-  headline: 'The setup has a setup.', kicker: 'Go-to-market engineering:', cut: 4.0, total: 7.0,
+  // v2 (job 9d00c858): bigger kicker, smaller headline, clay dents and squishes under the panels, typed end line.
+  headline: 'The setup has a setup.', kicker: 'Go-to-market engineering:', kickerScale: 1.0, headScale: 0.72, cut: 4.0, total: 7.0,
+  endCard: { logoScale: 0.72, type: { start: 0.3, dur: 1.7 }, buttonAt: 0 },
   draw(ctx, L, R, t) {
     const k = R.k, cx = L.W / 2;
     const lands = [1.15, 2.05, 2.95], targets = [0.74, 0.5, 0.17], labels = ['Configure', 'Connect', 'Configure again'];
@@ -226,15 +229,24 @@ SPOTS.setup = {
     const ooze = clamp((t - lands[2]) / 0.9);
     const sFinal = s - 0.02 * ease(ooze);
     const top = R.top;
+    const ph = 190 * k, pw = 640 * k;
+    // dent: once the first panel lands, the crown under it is pressed flat and the clay squeezes out at its edges
+    const squash = 1 - sFinal;
+    const dentD = R.w * 0.8 * clamp(squash / 0.26);
+    const cap = top * sFinal - dentD;
     const def = (p, b) => {
       const hgt = -p.y; const hn = hgt / top;
-      const squash = 1 - sFinal;
       const bulge = 1 + squash * (0.16 + 0.16 * (1 - hn)) + 0.04 * ease(ooze) * (1 - hn);
-      return { x: p.x * bulge, y: -hgt * sFinal, w: b.w * (1 + squash * 0.12) };
+      const x = p.x * bulge; let yh = hgt * sFinal, w = b.w * (1 + squash * 0.12);
+      if (dentD > 0 && yh > cap) {
+        const over = yh - cap, under = Math.abs(x) < pw * 0.5 ? 1 : clamp(1 - (Math.abs(x) - pw * 0.5) / (pw * 0.18));
+        yh = cap + over * (1 - under) + Math.sin(clamp(over / dentD) * Math.PI) * dentD * 0.9 * (1 - under); // ridge of pushed-out clay at the panel edge
+        w *= 1 + 0.6 * under * clamp(over / dentD); // pressed clay spreads fatter
+      }
+      return { x, y: -yh, w };
     };
     // stack heights
-    const rainbowTop = L.ground - top * sFinal - R.w * 0.5;
-    const ph = 190 * k, pw = 640 * k;
+    const rainbowTop = L.ground - cap - R.w * 0.5;
     // camera shake on impacts
     let shake = 0; lands.forEach(l => { const d = t - l; const amp = l === lands[2] ? 22 : 9; if (d >= 0 && d < 0.4) shake += Math.sin(d * 80) * amp * Math.exp(-d * 14); });
     ctx.save(); ctx.translate(0, shake);
@@ -579,6 +591,6 @@ function drawFrame(canvas, spotKey, ratio, t, logoImg) {
   const R = rainbowRest(L);
   drawStage(ctx, L);
   sp.draw(ctx, L, R, t);
-  drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null, sp.kickerScale ?? 0.62);
+  drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null, sp.kickerScale ?? 0.62, sp.headScale ?? 1);
 }
 window.drawFrame = drawFrame;
