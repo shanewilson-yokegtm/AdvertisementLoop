@@ -123,3 +123,6 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:8px 10px
 .navcount{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:6px;border-radius:999px;background:#D63A27;color:#fff;font-size:12px;font-weight:700}
 .cmt.decide.apply{border-left:3px solid var(--ok)}
 .cmt.decide.dismiss{opacity:.6}
+.changelog{display:flex;flex-direction:column;gap:12px}
+.cl-entry{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-top:1px solid var(--border)}
+.cl-entry ul{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}

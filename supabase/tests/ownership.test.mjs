@@ -218,5 +218,21 @@ ok('ignored feedback is closed with its reason, no version, no worker job', (awa
 ok('an ad with only ignored feedback stays approved', (await val(`select status from reviews where version_id='ast_ok2_v1'`))[0].status === 'approved');
 await denied('nothing chosen at all is still refused', HENRY, `select processing_approve(p.id, p.rev, '[]', '', false) from processing_start('ast_ok','app') p`, /already|select at least one/);
 
+// ---------- change log ----------
+{ const log = (await q(TENG, `select change_log('ast_teng') l`))[0].l;
+  const v3 = log.find(e => e.version === 3);
+  ok('change log: each version with what changed and who made it', log.filter(e => e.kind === 'version').length >= 4 && v3.what_changed === 'Shorter headline' && v3.from_version === 2);
+  ok('change log: accepted and ignored comments with authors and reasons', v3.round.accepted[0].body === 'Shorter headline' && v3.round.accepted[0].author === 'Henry'
+    && v3.round.ignored[0].body === 'Use the coral CTA' && v3.round.ignored[0].reason === 'Keep current CTA');
+  ok('change log: reverts are labelled', log.some(e => e.reverted_from === 1)); }
+ok('any member can read the change log (decisions are the team record)', (await q(HENRY, `select jsonb_array_length(change_log('ast_teng')) n`))[0].n >= 4);
+{ const log = (await q(HENRY, `select change_log('ast_ok2') l`))[0].l;
+  ok('a round that only ignored feedback is recorded too', log.some(e => e.kind === 'closed' && e.round.ignored[0].reason === 'Off brief')); }
+await db.exec(`insert into assets(id,concept_name,kind,format,created_by,owner_id) values ('ast_leg','Legacy','static','square','${TENG}','${TENG}');
+  insert into versions(id,asset_id,version,file_path) values ('x','ast_leg',0,'ast_leg/v1.png'); insert into versions(id,asset_id,version,file_path,revision_note) values ('x','ast_leg',0,'ast_leg/v2.png','Bigger logo');
+  insert into comments(asset_id,version_id,body,author,status,applied_in) values ('ast_leg','ast_leg_v1','Make the logo bigger','${HENRY}','applied','ast_leg_v2');`);
+ok('older versions show the comments used in them', (await q(HENRY, `select change_log('ast_leg') l`))[0].l.find(e => e.version === 2).round.accepted[0].body === 'Make the logo bigger');
+ok('drafts are not in the change log', !JSON.stringify((await q(HENRY, `select change_log('ast_ok') l`))[0].l).includes('"note":"From'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

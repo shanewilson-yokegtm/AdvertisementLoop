@@ -46,6 +46,7 @@ function reviewFixture(initial = [v1], query = '') {
     'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); }, push: url => { pushed.push(url); } }) },
     '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {} },
     '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }) },
+    '@/components/ChangeLog': { __esModule: true, default: () => null },
     '@/lib/supabase/browser': { sb: () => ({ from: table => ({ upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
     '@/components/Shell': { useApp: () => ({ member, toast: () => {} }) },
     '@/components/Media': { Player: ({ v }) => React.createElement('div', { id: 'selected-media' }, v.id) },
@@ -189,6 +190,16 @@ test('after sending, the owner sees it queued and can cancel before Claude start
   assert.match(document.body.textContent, /v3 arrives within the hour/);
   await act(async () => button('Cancel').click()); await flush();
   assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
+  await finish();
+});
+
+test('the change log shows what changed, accepted and ignored feedback', async () => {
+  const log = [{ kind: 'version', at: '', version_id: 'asset_v2', version: 2, from_version: 1, made_by: 'Claude', what_changed: 'Shorter headline',
+    round: { reviewed_version: 1, decided_by: 'Shane', note: 'Keep the visual', accepted: [{ author: 'Teng', body: 'Shorter headline', at_sec: 3, source: 'slack', source_link: 'https://slack/p1' }], ignored: [{ author: 'Henry', body: 'Coral CTA', at_sec: null, source: 'app', source_link: null, reason: 'Off brief' }] } }];
+  const CL = source('src/components/ChangeLog.tsx', { '@/lib/supabase/browser': { sb: () => ({ rpc: async () => ({ data: log, error: null }) }) }, '@/lib/data': { fmtDate: () => 'Oct 29', fmtSec: s => '0:0' + s } }).default;
+  await mount(() => React.createElement(CL, { assetId: 'asset', refreshKey: '1', onOpen: () => {} })); await flush();
+  const t = document.body.textContent;
+  assert.match(t, /Shorter headline/); assert.match(t, /Accepted · 1/); assert.match(t, /Teng at 0:03/); assert.match(t, /Ignored · 1/); assert.match(t, /Off brief/); assert.match(t, /Note from Shane: Keep the visual/);
   await finish();
 });
 

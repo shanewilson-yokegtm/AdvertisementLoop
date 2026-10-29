@@ -12,6 +12,7 @@ import Share from '@/components/Share';
 import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
 import { useRecorder, saveVoiceComment, RecordControl } from '@/components/VoiceNote';
 import ProcessFeedback, { type Processing } from '@/components/Process';
+import ChangeLog from '@/components/ChangeLog';
 
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
@@ -138,6 +139,7 @@ function AssetDetail({ id }: { id: string }) {
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         {manage ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }}
           who={who} audioUrls={audioUrls} toast={toast} onOpen={selectVersion} ownerName={ownerName} /> : null}
+        <ChangeLog assetId={a.id} onOpen={selectVersion} refreshKey={`${vs.length}:${comments.rows.filter(c => c.status !== 'open').length}:${proc?.status || ''}`} />
         <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>{manage ? 'Comment history' : 'Feedback'}</h2>
           {/* Owners decide on open comments above; here they see what was accepted/ignored. Everyone else sees the full thread. */}
           {(() => { const list = manage ? comments.rows.filter(c => c.status !== 'open') : comments.rows; return !list.length ? <div className="muted">{manage ? 'Nothing decided yet' : 'No comments yet'}</div> : list.map(c => { const cv = vs.find(x => x.id === c.version_id);
