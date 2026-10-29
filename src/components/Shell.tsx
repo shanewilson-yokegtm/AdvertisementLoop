@@ -32,6 +32,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="me">
           <span className="nm">{member ? member.display_name : loading ? '' : email || ''}</span>
           {member ? <span className="chip">{member.role === 'admin' || member.role === 'approver' ? 'Approver' : member.role === 'creator' ? 'Creator' : 'Viewer'}</span> : null}
+          <Link className="btn small" href="/connect">Connect Claude</Link>
           <button className="btn small" onClick={async () => { await sb().auth.signOut(); location.href = '/login'; }}>Sign out</button>
         </div>
       </div></header>

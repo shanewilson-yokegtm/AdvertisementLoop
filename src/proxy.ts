@@ -16,7 +16,8 @@ export async function proxy(request: NextRequest) {
   });
   const { data: { user } } = await supabase.auth.getUser();
   const p = request.nextUrl.pathname;
-  const open = p.startsWith('/login') || p.startsWith('/auth') || p === '/api/health';
+  // /api/v1 and /api/slack authenticate per request (personal token / Slack signature), not with the browser session.
+  const open = p.startsWith('/login') || p.startsWith('/auth') || p === '/api/health' || p.startsWith('/api/v1/') || p.startsWith('/api/slack/');
   if (!user && !open) {
     if (p.startsWith('/api/')) return NextResponse.json({ error: 'signed_out' }, { status: 401 });
     const url = request.nextUrl.clone(); url.pathname = '/login'; url.search = p === '/' ? '' : `?next=${encodeURIComponent(p)}`;

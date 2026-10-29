@@ -36,6 +36,26 @@ Nothing here uses Rumi or other Yoke production systems.
 4. Supabase → Authentication → URL Configuration: **Site URL** = the Vercel URL; **Redirect URLs** add `https://<vercel-url>/auth/callback`.
 5. Supabase → Authentication → Emails: the built-in mailer is rate-limited (a few emails per hour). Fine for 3 people; add custom SMTP before inviting more.
 
+## Ownership, feedback and processing
+
+- Every ad has an owner (its creator). Only the owner or an admin can add versions, revert, reject, share to Slack, resolve feedback, or read its review drafts and working chats. Everyone can read and comment. Approval stays with approvers. All of this is enforced in the database (`supabase/migrations/*ownership_processing*`).
+- **Feedback to process**: each owner's pending feedback (server-computed `feedback_inbox`), with an admin view of everyone's.
+- **Process feedback** opens one shared review record (`processing`), used by the app and by each person's Claude. Nothing changes until someone picks decisions and executes. Saves are checked against the current version; conflicts are surfaced, never overwritten.
+- **Execute changes** in the app queues the revision worker (scheduled Claude session, hourly, playbook in `creative/REVISIONS.md`). In Claude, the person approves and the result is saved directly.
+
+## Claude skill and API
+
+- Skill package: `skills/yoke-ad-maker/` (zip: `skills/yoke-ad-maker.zip`). Helper: `scripts/adstudio.py`.
+- API: `/api/v1/*`, authenticated with a personal token from **Connect Claude** (stored hashed, revocable). Needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel; all writes still go through owner/admin checks as the token's member.
+- Tests: `npm test` (database rules, API, Slack, UI) and `npm run test:e2e` (skill helper -> API -> database with real file bytes).
+
+## Slack review threads
+
+1. Create a Slack app for the Yoke workspace. Bot scopes: `chat:write`, `channels:history`, `groups:history`, `reactions:read`, `users:read`, `users:read.email`, `channels:read`, `groups:read`.
+2. Event Subscriptions: request URL `https://<app>/api/slack/events`; bot events `message.channels`, `message.groups`, `reaction_added`, `reaction_removed`.
+3. Vercel env: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `APP_URL` (the public app URL).
+4. Invite the app to a test channel. Owners pick the channel when sharing; replies in that thread become comments on the shared version.
+
 ## Optional features (off until approved)
 
 - **Claude in Create an ad**: needs `ANTHROPIC_API_KEY` (Anthropic API, billed separately). Without it, conversations and type choices are saved but Claude doesn't reply.

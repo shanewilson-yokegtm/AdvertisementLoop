@@ -170,5 +170,30 @@ ok('server acting for Teng can', (await q('server', `select status from processi
 await denied('server without a named member is refused', 'server', `select feedback_inbox('mine')`, /not a member/);
 ok('server inbox for Henry shows only Henry’s work', (await q('server', `select asset_id from feedback_inbox('mine','${HENRY}')`)).length === 0);
 
+// ---------- personal API tokens ----------
+const tok = (await q(TENG, `select * from api_token_create('Teng laptop Claude')`))[0];
+ok('token shown once, stored hashed', tok.token.startsWith('yas_') && (await val(`select count(*)::int n from api_tokens where token_hash = encode(sha256(convert_to('${tok.token}','UTF8')),'hex')`))[0].n === 1
+  && (await val(`select count(*)::int n from api_tokens where token_hash = '${tok.token}'`))[0].n === 0);
+ok('members see only their own tokens', (await q(HENRY, `select count(*)::int n from api_tokens`))[0].n === 0 && (await q(TENG, `select count(*)::int n from api_tokens`))[0].n === 1);
+await denied('members cannot resolve tokens', HENRY, `select * from api_token_resolve('x')`);
+const res = (await q('server', `select * from api_token_resolve(encode(sha256(convert_to('${tok.token}','UTF8')),'hex'))`))[0];
+ok('server resolves a token to its member (not admin)', res.user_id === TENG && res.role === 'creator');
+await denied('Henry cannot revoke Teng\u2019s token', HENRY, `select api_token_revoke('${tok.id}')`);
+await allowed('Teng revokes his token', TENG, `select api_token_revoke('${tok.id}')`);
+ok('revoked token resolves to nothing', (await q('server', `select * from api_token_resolve(encode(sha256(convert_to('${tok.token}','UTF8')),'hex'))`)).length === 0);
+
+// ---------- idempotent saves ----------
+await allowed('save with an idempotency key', TENG, `insert into versions(id,asset_id,version,file_path,source) values ('x','ast_teng',0,'ast_teng/v5.png','{"idempotency_key":"k1"}')`);
+await denied('a retried save does not duplicate the version', TENG, `insert into versions(id,asset_id,version,file_path,source) values ('x','ast_teng',0,'ast_teng/v5.png','{"idempotency_key":"k1"}')`, /duplicate|unique/);
+
+// ---------- Slack provenance ----------
+await allowed('member comment', HENRY, `insert into comments(asset_id,version_id,body,source,source_ref,source_link) values ('ast_teng','ast_teng_v1','fake slack','slack','C1:1.1','https://evil')`);
+ok('clients cannot forge Slack provenance', (await val(`select source, source_ref from comments where body='fake slack'`))[0].source === 'app' && (await val(`select source_ref from comments where body='fake slack'`))[0].source_ref === null);
+await db.exec(`insert into comments(asset_id,version_id,body,author,source,source_ref,source_link) values ('ast_teng','ast_teng_v1','From Slack','${HENRY}','slack','C1:2.2','https://slack/p')`);
+try { await db.exec(`insert into comments(asset_id,version_id,body,author,source,source_ref) values ('ast_teng','ast_teng_v1','From Slack again','${HENRY}','slack','C1:2.2')`); ok('a Slack message becomes one comment, even on retry', false); }
+catch { ok('a Slack message becomes one comment, even on retry', true); }
+await denied('members cannot write Slack posts directly', TENG, `insert into slack_posts(asset_id,version_id,channel_id,idempotency_key) values ('ast_teng','ast_teng_v1','C1','k')`);
+ok('identity mapping is server-only', (await q(TENG, `select count(*)::int n from slack_users`))[0].n === 0);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
