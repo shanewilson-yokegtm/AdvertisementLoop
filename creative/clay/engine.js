@@ -310,11 +310,20 @@ function pill(ctx, x, y, text, k, bg, fg, scale = 1) {
 function slicePts(pts, s0, s1) { return pts.filter(p => p.s >= s0 - 1e-9 && p.s <= s1 + 1e-9 && !(p.foot)); }
 
 // ---------- Spot 1: Credit meltdown ----------
+// v2 (job d0aee1c6): slower (gag 0-6.5s, 9.5s total). The dial is gone: algebra spins off the rainbow, a buzzing
+// swarm of ever more complicated equations circles it, and the rainbow melts under them. Typed end line, bigger lockup.
+const CREDIT_EQS = [
+  'credits × rows', '÷ 0.8', 'x = ?', 'rows × 14 − refunds', 'Σ credits', 'c₁ + c₂ + … + cₙ', 'y = mx + b',
+  'Δcredits / Δt', '(c · r) / w', 'f(x) = 3x² − 7', '∫ cost dt', '√(enrich² + rows²)', 'x = (−b ± √(b² − 4ac)) / 2a',
+  'lim n→∞ cost(n)', '2ⁿ waterfalls', '% match × $', 'Σᵢ (credits · rowsᵢ)', 'dC/dr = ?', '(rows − dupes) × 1.5',
+  '∂cost/∂waterfall', 'Π(1 − bounce)', 'n! enrichments', 'log₂(credits)', '∑ ∑ cᵢⱼ', 'e^(rows·t)', '≈ $$$', 'x² + y² = credits²', '∞ − credits',
+];
 SPOTS.credit = {
-  headline: 'Still doing credit math?', kicker: KICK, cut: 4.0, total: 7.0,
+  headline: 'Still doing credit math?', kicker: KICK, cut: 6.5, total: 9.5,
+  endCard: { logoScale: 0.72, type: { start: 0.35, dur: 1.7 }, buttonAt: 2.25 },
   draw(ctx, L, R, t) {
     const k = R.k, cx = L.W / 2, top = R.top;
-    const m = smooth((t - 0.35) / 2.75);
+    const m = smooth((t - 3.7) / 2.5); // melt 3.7-6.2s
     // puddle grows under the rainbow
     if (m > 0.02) {
       for (let i = 0; i < BANDS.length; i++) {
@@ -326,11 +335,14 @@ SPOTS.credit = {
         ctx.restore();
       }
     }
+    // strain: the arch shivers more as the swarm builds, then sags
+    const strain = smooth((t - 1.0) / 2.6) * (1 - m);
     const def = (p, b) => {
       const hgt = Math.max(-p.y, -R.w * 0.6), hn = clamp(hgt / top);
       const h2 = hgt * (1 - 0.94 * m) * (1 - 0.12 * m * hn);
       const sag = Math.sin((p.x / top) * 3 + t * 2.5) * 7 * k * m * hn;
-      return { x: p.x * (1 + 0.3 * m * (1 - hn * 0.4)), y: -h2 + sag, w: b.w * (1 + 0.3 * m) };
+      const shiv = Math.sin(t * 31 + p.x * 0.05) * 3 * k * strain * hn;
+      return { x: p.x * (1 + 0.3 * m * (1 - hn * 0.4)) + shiv, y: -h2 + sag, w: b.w * (1 + 0.3 * m) };
     };
     drawRainbow(ctx, L, R, cx, def);
     // drips
@@ -346,28 +358,40 @@ SPOTS.credit = {
         drawTube(ctx, L.W, L.H, pts, b.color, 99 + j);
       });
     }
-    // cost meter: dial whose needle never stops
-    const yTop = stackTopY(L, R), dialR = L.H > 1500 ? 175 : 118;
-    const dy = (L.headY + 60 + yTop) / 2 + 10;
-    const dxp = cx;
-    ctx.save(); ctx.translate(dxp, dy);
-    ctx.save(); ctx.filter = 'blur(12px)'; ctx.fillStyle = 'rgba(50,30,10,0.22)'; ctx.beginPath(); ctx.arc(8, 14, dialR, 0, 7); ctx.fill(); ctx.restore();
-    ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(0, 0, dialR, 0, 7); ctx.fill(); ctx.lineWidth = 6; ctx.strokeStyle = C.ink; ctx.stroke();
-    const a0 = Math.PI * 0.75, sweep = Math.PI * 1.5;
-    ctx.lineWidth = 14; ctx.strokeStyle = C.coral; ctx.beginPath(); ctx.arc(0, 0, dialR * 0.78, a0 + sweep * 0.72, a0 + sweep); ctx.stroke();
-    for (let i = 0; i <= 12; i++) { const a = a0 + sweep * i / 12; ctx.lineWidth = i % 3 ? 3 : 5; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.moveTo(Math.cos(a) * dialR * 0.62, Math.sin(a) * dialR * 0.62); ctx.lineTo(Math.cos(a) * dialR * (i % 3 ? 0.7 : 0.74), Math.sin(a) * dialR * (i % 3 ? 0.7 : 0.74)); ctx.stroke(); }
-    // needle: ticks up in steps, then keeps going around after the collapse
-    let f = 0; const steps = Math.floor(t / 0.25); const frac = (t % 0.25) / 0.25; const stepEase = steps + clamp(frac * 4);
-    f = Math.min(stepEase * 0.075, 0.98);
-    if (t > 3.0) f = 0.98 + Math.pow(t - 3.0, 1.6) * 1.7;
-    const na = a0 + sweep * f;
-    ctx.strokeStyle = C.coral; ctx.lineWidth = 8; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-Math.cos(na) * dialR * 0.12, -Math.sin(na) * dialR * 0.12); ctx.lineTo(Math.cos(na) * dialR * 0.72, Math.sin(na) * dialR * 0.72); ctx.stroke();
-    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(0, 0, dialR * 0.1, 0, 7); ctx.fill();
-    // coin symbol under the hub
-    ctx.fillStyle = C.ink; ctx.font = `700 ${dialR * 0.32}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 4; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.arc(0, dialR * 0.45, dialR * 0.17, 0, 7); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, dialR * 0.45, dialR * 0.08, 0, 7); ctx.stroke();
+    // equation swarm: each one pops off the outer band, then joins a buzzing orbit around the arch
+    const tall = L.H > 1500;
+    const ocx = cx, ocy = L.ground - top * 0.68;
+    const rxB = Math.min(top * 1.15, L.W * 0.38), ryB = top * (tall ? 0.8 : 0.66);
+    const N = CREDIT_EQS.length;
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    for (let j = 0; j < N; j++) {
+      const ts = 0.5 + 3.4 * Math.pow(j / (N - 1), 0.75); // slow start, then a flood
+      const d = t - ts; if (d < 0) continue;
+      const Rn = rng(900 + j * 31);
+      const a0 = lerp(0.15, 0.85, Rn()) * Math.PI;           // where on the arch it leaves from
+      const b0 = R.bands[0], sp = b0.pts.reduce((a, q) => Math.abs(q.s - a0 / Math.PI) < Math.abs(a.s - a0 / Math.PI) ? q : a);
+      const p0 = { x: cx + sp.x, y: L.ground + sp.y };
+      const nx = Math.cos(Math.PI - a0), ny = -Math.sin(Math.PI - a0);
+      // pop: shoot out along the normal and bounce once
+      const pop = ease(d / 0.45), bounce = Math.exp(-d * 6) * Math.sin(d * 18) * 14 * k;
+      const pPop = { x: p0.x + nx * (90 * k * pop + bounce), y: p0.y + ny * (90 * k * pop + bounce) };
+      // orbit: angle speeds up over time (the buzz), each on its own lane
+      const lane = 0.82 + Rn() * 0.36, dir = 1;
+      const w0 = Math.atan2((pPop.y - ocy) / ryB, (pPop.x - ocx) / rxB);
+      const spin = 0.7 + 1.4 * smooth((t - 1.5) / 4) + Rn() * 1.1, fan = (Rn() - 0.3) * Math.PI * 1.3;
+      const ang = w0 + fan * smooth((d - 0.35) / 1.2) + dir * (d * spin + 0.25 * d * d * smooth((t - 2) / 3));
+      const pOrb = { x: ocx + Math.cos(ang) * rxB * lane, y: ocy + Math.sin(ang) * ryB * lane + Math.sin(t * 7 + j) * 6 * k };
+      const join = smooth((d - 0.35) / 0.8);
+      const x = lerp(pPop.x, pOrb.x, join), y = lerp(pPop.y, pOrb.y, join);
+      const depth = 0.85 + 0.15 * Math.sin(ang); // a touch smaller "behind"
+      const sz = (tall ? 60 : 54) * k * (0.8 + 0.45 * Rn()) * Math.min(1, d / 0.25 + 0.2) * depth;
+      const rot = (Rn() - 0.5) * 0.5 + Math.sin(t * 3 + j) * 0.12 + (1 - pop) * 1.2 * (Rn() > 0.5 ? 1 : -1);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+      ctx.font = `italic 600 ${sz}px ${FONT}`;
+      ctx.lineWidth = sz * 0.22; ctx.strokeStyle = 'rgba(251,248,241,0.92)'; ctx.strokeText(CREDIT_EQS[j], 0, 0);
+      ctx.fillStyle = j % 5 === 3 ? C.coral : C.ink; ctx.fillText(CREDIT_EQS[j], 0, 0);
+      ctx.restore();
+    }
     ctx.restore();
   },
 };
