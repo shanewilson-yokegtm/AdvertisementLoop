@@ -1,3 +1,4 @@
+-- @supabase-only (storage/realtime; skipped by the PGlite tests)
 -- Supabase-only pieces: private media bucket, its access rules, realtime, first admin.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

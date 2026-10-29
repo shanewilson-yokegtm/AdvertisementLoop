@@ -158,6 +158,13 @@ test('Make next version is off until something is accepted; clicking Accept star
   await finish();
 });
 
+test('ignoring everything offers Close ignored instead of making a version', async () => {
+  const f = processFixture(null, [cA]); await mount(f.Panel);
+  await act(async () => radio(0, 'Ignore').click()); await flush();
+  assert.ok(button('Close ignored') && !button('Close ignored').disabled);
+  await finish();
+});
+
 test('choices made in Claude show up in the app', async () => {
   const f = processFixture(reviewing, [cA, cB, cLate]); await mount(f.Panel);
   assert.equal(radio(0, 'Accept').getAttribute('aria-checked'), 'true');

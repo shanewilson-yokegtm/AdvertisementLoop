@@ -29,8 +29,7 @@ await db.exec(`
 // Storage/realtime-only migrations need Supabase services that PGlite doesn't have.
 for (const f of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) {
   const sql = readFileSync(path.join(dir, f), 'utf8');
-  if (/storage\.(buckets|objects)/.test(sql)) continue;
-  await db.exec(sql.replace(/^alter publication.*$/gm, ''));
+  await db.exec(sql.split('-- @supabase-only')[0].replace(/^alter publication.*$/gm, ''));
 }
 ok('all migrations apply', true);
 
@@ -194,6 +193,30 @@ try { await db.exec(`insert into comments(asset_id,version_id,body,author,source
 catch { ok('a Slack message becomes one comment, even on retry', true); }
 await denied('members cannot write Slack posts directly', TENG, `insert into slack_posts(asset_id,version_id,channel_id,idempotency_key) values ('ast_teng','ast_teng_v1','C1','k')`);
 ok('identity mapping is server-only', (await q(TENG, `select count(*)::int n from slack_users`))[0].n === 0);
+
+// ---------- accepting feedback reopens an approved ad ----------
+await allowed('Henry makes and Shane approves a ready ad', HENRY, `insert into assets(id,concept_name,kind,format) values ('ast_ok','Approved ad','static','square'); insert into versions(id,asset_id,version,file_path) values ('x','ast_ok',0,'ast_ok/v1.png')`);
+await as(SHANE, `insert into reviews(version_id,status) values ('ast_ok_v1','approved')`);
+await as(TENG, `insert into comments(asset_id,version_id,body) values ('ast_ok','ast_ok_v1','Change the CTA'), ('ast_ok','ast_ok_v1','Nice')`);
+let pk = (await q(HENRY, `select * from processing_start('ast_ok','app')`))[0];
+const okIds = Object.fromEntries((await val(`select body, id from comments where asset_id='ast_ok'`)).map(r => [r.body, r.id]));
+await as(HENRY, `select processing_save_proposal('${pk.id}', ${pk.rev}, '{"draft":{"decisions":[{"comment_id":"${okIds['Change the CTA']}","decision":"apply"}]}}')`);
+ok('saving a draft Accept does not reopen it', (await val(`select status from reviews where version_id='ast_ok_v1'`))[0].status === 'approved');
+pk = (await q(HENRY, `select * from processing where id='${pk.id}'`))[0];
+await as(HENRY, `select processing_approve('${pk.id}', ${pk.rev}, '[{"comment_id":"${okIds['Change the CTA']}","decision":"apply"},{"comment_id":"${okIds['Nice']}","decision":"dismiss"}]', '', false)`);
+{ const r = (await val(`select status, reviewer, note from reviews where version_id='ast_ok_v1'`))[0];
+  ok('committing accepted feedback takes the ad out of Approved', r.status === 'changes' && r.reviewer === HENRY && /Reopened/.test(r.note)); }
+ok('the earlier approval stays in history', (await val(`select array_agg(status order by id) s from review_history where version_id='ast_ok_v1'`))[0].s.join() === 'approved,changes');
+// ignoring everything does not reopen
+await allowed('another approved ad', HENRY, `insert into assets(id,concept_name,kind,format) values ('ast_ok2','Approved ad 2','static','square'); insert into versions(id,asset_id,version,file_path) values ('x','ast_ok2',0,'ast_ok2/v1.png')`);
+await as(SHANE, `insert into reviews(version_id,status) values ('ast_ok2_v1','approved')`);
+await as(TENG, `insert into comments(asset_id,version_id,body) values ('ast_ok2','ast_ok2_v1','Meh')`);
+pk = (await q(HENRY, `select * from processing_start('ast_ok2','app')`))[0];
+await allowed('closing only ignored feedback', HENRY, `select processing_approve('${pk.id}', ${pk.rev}, '[{"comment_id":"${(await val(`select id from comments where asset_id='ast_ok2'`))[0].id}","decision":"dismiss","note":"Off brief"}]', '', true)`);
+ok('ignored feedback is closed with its reason, no version, no worker job', (await val(`select status, resolution_note from comments where asset_id='ast_ok2'`))[0].resolution_note === 'Off brief'
+  && (await val(`select latest_version from assets where id='ast_ok2'`))[0].latest_version === 1 && (await val(`select count(*)::int n from revision_jobs where asset_id='ast_ok2'`))[0].n === 0);
+ok('an ad with only ignored feedback stays approved', (await val(`select status from reviews where version_id='ast_ok2_v1'`))[0].status === 'approved');
+await denied('nothing chosen at all is still refused', HENRY, `select processing_approve(p.id, p.rev, '[]', '', false) from processing_start('ast_ok','app') p`, /already|select at least one/);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

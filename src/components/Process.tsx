@@ -94,7 +94,7 @@ export default function ProcessFeedback({ a, vs, comments, proc, reload, who, au
       {lastOut ? <button className="btn small" onClick={() => onOpen(lastOut.id)}>View v{lastOut.version}</button> : null}
       {last.status === 'failed' && last.message ? <span className="muted">{last.message}</span> : null}</div> : null}
     {!open.length ? <p className="muted">No open feedback.</p> : <>
-      <p className="muted">Accept what should go into v{(latest?.version || 0) + 1}. Ignore the rest. Nothing changes until you press Make next version.</p>
+      <p className="muted">Accept what should go into v{(latest?.version || 0) + 1}. Ignore the rest. Nothing changes until you press Make next version{a.archived ? '' : ', which also takes an approved ad back into review'}.</p>
       {decidable.map(c => { const cv = vs.find(x => x.id === c.version_id); const d = dec[c.id];
         return <div key={c.id} className={'cmt decide' + (d ? ' ' + d : '')}>
           <div className="row"><b>{who(c.author, c.legacy_author)}</b><span className="muted">v{cv?.version ?? '?'}{c.at_sec != null ? ' · at ' + fmtSec(c.at_sec) : ''} · {fmtDate(c.created_at)}{c.source === 'slack' ? ' · Slack' : ''}</span></div>
@@ -112,17 +112,17 @@ export default function ProcessFeedback({ a, vs, comments, proc, reload, who, au
       <textarea id="proc-instr" rows={2} placeholder="e.g. keep Henry’s visual, use Teng’s headline" value={extra} onChange={e => setExtra(e.target.value)} onBlur={() => persist(dec, notes, extra)} />
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="muted" role="status">{nAccept} accepted · {nIgnore} ignored · {decidable.length - nAccept - nIgnore} not decided</span>
-        <button className="btn primary" disabled={busy || (!nAccept && !extra.trim())} onClick={async () => {
+        <button className="btn primary" disabled={busy || (!nAccept && !extra.trim() && !nIgnore)} onClick={async () => {
           setBusy(true);
           try {
             let p = rec.current || await rpc('processing_start', { p_asset: a.id, p_via: 'app' });
             const ids = new Set(p.comment_ids);
             const final = decisions().filter(x => ids.has(x.comment_id));
             p = await rpc('processing_approve', { p_id: p.id, p_rev: p.rev, p_decisions: final, p_instructions: extra, p_queue_worker: true });
-            toast(`Sent · v${(latest?.version || 0) + 1} arrives in the Library within the hour`);
+            toast(nAccept || extra.trim() ? `Sent · v${(latest?.version || 0) + 1} arrives in the Library within the hour` : 'Ignored comments closed');
           } catch (e) { toast(friendly(e)); }
           setBusy(false); reload();
-        }}>Make next version</button>
+        }}>{!nAccept && !extra.trim() && nIgnore ? 'Close ignored' : 'Make next version'}</button>
       </div>
     </>}
   </section>;

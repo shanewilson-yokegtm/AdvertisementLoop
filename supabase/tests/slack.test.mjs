@@ -24,8 +24,7 @@ await db.exec(`create role anon nologin; create role authenticated nologin; crea
   grant usage on schema public to anon, authenticated, service_role;`);
 for (const f of readdirSync(path.join(here, '../migrations')).filter(f => f.endsWith('.sql')).sort()) {
   const sql = readFileSync(path.join(here, '../migrations', f), 'utf8');
-  if (/storage\.(buckets|objects)/.test(sql)) continue;
-  await db.exec(sql.replace(/^alter publication.*$/gm, ''));
+  await db.exec(sql.split('-- @supabase-only')[0].replace(/^alter publication.*$/gm, ''));
 }
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c', HENRY = '00000000-0000-0000-0000-0000000000cc';
 await db.exec(`insert into role_grants values ('shane.wilson@yokegtm.com','admin');

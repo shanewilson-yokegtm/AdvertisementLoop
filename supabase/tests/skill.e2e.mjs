@@ -30,8 +30,7 @@ await db.exec(`create role anon nologin; create role authenticated nologin; crea
   alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
   grant usage on schema public to anon, authenticated, service_role;`);
 for (const f of readdirSync(path.join(here, '../migrations')).filter(f => f.endsWith('.sql')).sort()) {
-  const sql = readFileSync(path.join(here, '../migrations', f), 'utf8'); if (/storage\.(buckets|objects)/.test(sql)) continue;
-  await db.exec(sql.replace(/^alter publication.*$/gm, ''));
+  const sql = readFileSync(path.join(here, '../migrations', f), 'utf8'); await db.exec(sql.split('-- @supabase-only')[0].replace(/^alter publication.*$/gm, ''));
 }
 const TENG = '00000000-0000-0000-0000-00000000000c', HENRY = '00000000-0000-0000-0000-0000000000cc';
 await db.exec(`insert into auth.users(id,email) values ('${TENG}','teng.he@yokegtm.com'),('${HENRY}','henry@yokegtm.com');`);

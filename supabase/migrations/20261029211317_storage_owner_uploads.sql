@@ -1,3 +1,4 @@
+-- @supabase-only (storage/realtime; skipped by the PGlite tests)
 -- Supabase-only: uploads go into an ad's folder only for its owner or an admin.
 -- Voice notes (comments/<asset_id>/...) can be added by any member who can comment, on an existing ad.
 drop policy "ad-assets upload" on storage.objects;
