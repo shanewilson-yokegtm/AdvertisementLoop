@@ -16,8 +16,8 @@ if (mode === 'stills') { for (const t of rest[0].split(',').map(Number)) fs.writ
 else {
   const out = rest[0], tmp = out.replace(/\.mp4$/, '.tmp.mp4');
   const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', '30', '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmp], { stdio: ['pipe', 'inherit', 'inherit'] });
-  const meta = await p.evaluate(s => ({ cut: SPOTS[s].cut ?? 2.0, total: SPOTS[s].total ?? 5.0 }), spot); let endBuf = null;
-  for (let f = 0; f < Math.round(meta.total * 30); f++) { const t = f / 30; let buf; if (t >= meta.cut) { endBuf ??= await grab(t, 0.95); buf = endBuf; } else buf = await grab(t, 0.95); if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r)); }
+  const meta = await p.evaluate(s => ({ cut: SPOTS[s].cut ?? 2.0, total: SPOTS[s].total ?? 5.0, animEnd: !!SPOTS[s].endCard }), spot); let endBuf = null;
+  for (let f = 0; f < Math.round(meta.total * 30); f++) { const t = f / 30; let buf; if (t >= meta.cut && !meta.animEnd) { endBuf ??= await grab(t, 0.95); buf = endBuf; } else buf = await grab(t, 0.95); if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r)); }
   ff.stdin.end(); const code = await new Promise(r => ff.on('close', r));
   if (code === 0) fs.renameSync(tmp, out); else console.error('ffmpeg failed', code);
 }

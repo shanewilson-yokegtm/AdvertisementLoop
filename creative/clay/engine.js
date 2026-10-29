@@ -100,11 +100,18 @@ function drawStage(ctx, L) {
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
-function drawHeadline(ctx, L, text, alpha = 1, kicker = null) {
+// kickerScale: kicker size relative to the headline (0.62 default). Per-spot option, see SPOTS.<key>.kickerScale.
+function drawHeadline(ctx, L, text, alpha = 1, kicker = null, kickerScale = 0.62) {
   ctx.save(); ctx.globalAlpha = alpha;
   ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   const size = L.W * 0.078;
-  if (kicker) { ctx.font = `600 ${size * 0.62}px ${FONT}`; ctx.fillStyle = C.muted; ctx.fillText(kicker, L.W / 2, L.headY - size * 1.15); ctx.fillStyle = C.ink; }
+  if (kicker) {
+    let ks = size * kickerScale; ctx.font = `600 ${ks}px ${FONT}`;
+    const kw = ctx.measureText(kicker).width, kMax = L.W - 110;
+    if (kw > kMax) { ks = ks * kMax / kw; ctx.font = `600 ${ks}px ${FONT}`; }
+    ctx.fillStyle = kickerScale > 0.62 ? C.ink : C.muted;
+    ctx.fillText(kicker, L.W / 2, L.headY - Math.max(size * 1.15, ks * 1.25)); ctx.fillStyle = C.ink;
+  }
   ctx.font = `600 ${size}px ${FONT}`;
   const tw = ctx.measureText(text).width, maxW = L.W - 110;
   if (tw > maxW) ctx.font = `600 ${size * maxW / tw}px ${FONT}`;
@@ -152,23 +159,47 @@ function drawPanel(ctx, x, y, w, h, label, rot = 0, k = 1) {
   ctx.restore();
 }
 
-function drawEndCard(ctx, L, logoImg) {
+// opts (per-spot, SPOTS.<key>.endCard): { logoScale, type: { start, dur }, buttonAt }. te = seconds since the cut.
+// With no opts this draws the original static card.
+function drawEndCard(ctx, L, logoImg, opts = null, te = 99) {
   const { W, H } = L;
   ctx.fillStyle = C.ink; ctx.fillRect(0, 0, W, H);
   const tall = H > 1500;
   const cy = tall ? H * 0.47 : H * 0.5;
   // lockup
-  const lw = W * 0.5, lh = lw * (102 / 401.59);
-  ctx.drawImage(logoImg, (W - lw) / 2, cy - (tall ? 330 : 290), lw, lh);
+  const ls = opts?.logoScale ?? 0.5;
+  const lw = W * ls, lh = lw * (102 / 401.59);
+  const logoBottom = cy - (tall ? 330 : 290) + W * 0.5 * (102 / 401.59);
+  ctx.drawImage(logoImg, (W - lw) / 2, ls === 0.5 ? cy - (tall ? 330 : 290) : logoBottom - lh, lw, lh);
   // promise
   ctx.fillStyle = C.canvas; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   const size = W * 0.074; ctx.font = `600 ${size}px ${FONT}`;
-  ctx.fillText('Go-to-market engineering', W / 2, cy + (tall ? 30 : 20));
-  ctx.fillText('should be easy.', W / 2, cy + (tall ? 30 : 20) + size * 1.18);
+  const l1 = 'Go-to-market engineering', l2 = 'should be easy.';
+  const y1 = cy + (tall ? 30 : 20), y2 = y1 + size * 1.18;
+  if (!opts?.type) { ctx.fillText(l1, W / 2, y1); ctx.fillText(l2, W / 2, y2); }
+  else {
+    // typed out, one character at a time; lines stay centred on their final width so nothing shifts
+    const n = Math.floor(clamp((te - opts.type.start) / opts.type.dur) * (l1.length + l2.length));
+    const s1 = l1.slice(0, n), s2 = l2.slice(0, Math.max(0, n - l1.length));
+    ctx.textAlign = 'left';
+    const x1 = (W - ctx.measureText(l1).width) / 2, x2 = (W - ctx.measureText(l2).width) / 2;
+    ctx.fillText(s1, x1, y1); ctx.fillText(s2, x2, y2);
+    // caret: steady while typing, blinks after
+    const done = n >= l1.length + l2.length;
+    if (te >= opts.type.start - 0.3 && (!done || Math.floor(te * 2.2) % 2 === 0)) {
+      const onL2 = n > l1.length;
+      const cx = onL2 ? x2 + ctx.measureText(s2).width : x1 + ctx.measureText(s1).width;
+      ctx.fillStyle = C.coral; ctx.fillRect(cx + size * 0.06, (onL2 ? y2 : y1) - size * 0.78, size * 0.07, size * 0.92);
+    }
+    ctx.textAlign = 'center';
+  }
   // CTA button
-  const bw = W * 0.46, bh = W * 0.12, by = cy + (tall ? 250 : 215);
+  const bAt = opts?.buttonAt ?? 0;
+  if (te < bAt) return;
+  const pop = opts ? 1 + Math.exp(-(te - bAt) * 9) * Math.sin((te - bAt) * 28) * 0.1 : 1;
+  const bw = W * 0.46 * pop, bh = W * 0.12 * pop, by = cy + (tall ? 250 : 215) + W * 0.06 * (1 - pop);
   ctx.fillStyle = C.coral; roundRect(ctx, (W - bw) / 2, by, bw, bh, bh / 2); ctx.fill();
-  ctx.fillStyle = C.ink; ctx.font = `600 ${W * 0.05}px ${FONT}`; ctx.textBaseline = 'middle';
+  ctx.fillStyle = C.ink; ctx.font = `600 ${W * 0.05 * pop}px ${FONT}`; ctx.textBaseline = 'middle';
   ctx.fillText('Start today', W / 2, by + bh / 2 + 2);
 }
 
@@ -455,21 +486,59 @@ SPOTS.repair = {
 };
 
 // ---------- Spot 5: What did it actually do? ----------
+// v2 (job e12252a0): slower, fewer things. Card goes in, the rainbow unravels band by band into a tangled heap
+// on the floor, then "Done" pops up over the mess. Hard cut at 7.0s, 10s total, typed end line, bigger lockup.
 SPOTS.output = {
-  headline: 'What did it actually do?', kicker: KICK, cut: 4.0, total: 7.0,
+  headline: 'What did it actually do?', kicker: KICK, kickerScale: 0.95, cut: 7.0, total: 10.0,
+  endCard: { logoScale: 0.72, type: { start: 0.35, dur: 1.7 }, buttonAt: 2.25 },
   draw(ctx, L, R, t) {
-    const k = R.k, cx = L.W / 2, top = R.top;
-    // account list card slides along the floor into the opening
-    const slide = ease(clamp((t - 0.2) / 1.1));
-    const swallow = smooth((t - 1.35) / 0.3);
+    const k = R.k, cx = L.W / 2;
+    // 1) account card slides in along the floor (0.3-1.9s), then is swallowed into the opening (1.9-2.4s)
+    const slide = ease(clamp((t - 0.3) / 1.6));
+    const swallow = smooth((t - 1.9) / 0.5);
     const cw = 250 * k, ch = 150 * k;
-    // shake while "working"
-    const working = t > 1.55 && t < 2.45;
-    const sh = working ? Math.sin(t * 70) * 9 * k : 0, rot = working ? Math.sin(t * 53) * 0.012 : 0;
-    ctx.save(); ctx.translate(cx, L.ground); ctx.rotate(rot); ctx.translate(-cx + sh, -L.ground);
-    drawRainbow(ctx, L, R, cx, (p, b) => ({ x: p.x, y: p.y * (working ? 1 + Math.sin(t * 61) * 0.02 : 1), w: b.w }));
+    // 2) unravel: each band peels from its right foot, outer band first
+    const U0 = 2.6, STAG = 0.45, DUR = 2.2;
+    const u = R.bands.map((b, i) => smooth((t - U0 - i * STAG) / DUR));
+    // the heap sits on the floor in front of the arch
+    const fl = L.H - L.ground;
+    const pc = { x: cx + 40 * k, y: L.ground + fl * (L.H > 1500 ? 0.36 : 0.42) };
+    const heap = R.bands.map((b, i) => {
+      // tangled scribble: two incommensurate loops per axis, so strands cross over each other and stack up
+      const Rn = rng(300 + i * 17), M = 190, pts = [], sc = k * (L.H > 1500 ? 1 : 0.8);
+      const p = [Rn() * 6.28, Rn() * 6.28, Rn() * 6.28, Rn() * 6.28];
+      const fa = 2.2 + i * 0.37 + Rn() * 0.4, fb = 5.3 + Rn(), fc = 3.1 + i * 0.29 + Rn() * 0.4, fd = 7.7 + Rn();
+      const ox = (i - 2) * 34 * sc + (Rn() - 0.5) * 30 * sc, oy = (Rn() - 0.5) * 24 * sc;
+      for (let j = 0; j <= M; j++) {
+        const v = j / M, T = v * Math.PI * 2;
+        const grow = 0.55 + 0.45 * v;
+        pts.push({
+          x: pc.x + ox + (165 * Math.sin(fa * T + p[0]) + 70 * Math.sin(fb * T + p[1])) * sc * grow,
+          y: pc.y + oy + (48 * Math.cos(fc * T + p[2]) + 28 * Math.sin(fd * T + p[3])) * sc * grow - (20 + 70 * v * (0.6 + 0.4 * Math.sin(fb * T))) * sc,
+          w: b.w * 0.92,
+        });
+      }
+      return pts;
+    });
+    // contact shadow under whatever is still standing, plus one under the heap
+    const standing = Math.max(...u.map(x => 1 - x));
+    if (standing > 0.01) contactShadow(ctx, cx, L.ground, R.top + R.w * 0.5, standing);
+    const heapAmt = Math.max(...u);
+    if (heapAmt > 0.01) { ctx.save(); ctx.filter = 'blur(20px)'; ctx.fillStyle = `rgba(70,45,20,${0.26 * heapAmt})`; ctx.beginPath(); ctx.ellipse(pc.x + 16, pc.y + 30 * k, 250 * k * heapAmt, 70 * k * heapAmt, 0, 0, 7); ctx.fill(); ctx.restore(); }
+    // standing arcs (clipped at the floor so the feet read as pressed in)
+    const cuts = [];
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, L.W, L.ground + 3); ctx.clip();
+    R.bands.forEach((b, i) => {
+      const sEnd = 1 - u[i];
+      let ps = b.pts.filter((p, pi) => pi > 0 && pi < b.pts.length - 1 && p.s <= sEnd + 1e-9);
+      ps = [b.pts[0], ...ps];
+      if (u[i] === 0) ps.push(b.pts[b.pts.length - 1]);
+      const scr = ps.map(p => ({ x: cx + p.x, y: L.ground + p.y, w: b.w }));
+      if (scr.length >= 2 && u[i] < 0.999) drawTube(ctx, L.W, L.H, scr, b.color, 11 + i * 7);
+      cuts.push(scr[scr.length - 1]);
+    });
     ctx.restore();
-    const drawCard = () => {
+    // swallowed card is drawn over the arch until it is gone
     if (swallow < 1) {
       const x = lerp(-cw, cx, slide), y = L.ground - ch / 2 - 6;
       ctx.save(); ctx.translate(x, y + swallow * ch * 0.5); ctx.scale(1 - swallow * 0.3, 1 - swallow);
@@ -478,47 +547,34 @@ SPOTS.output = {
       for (let r = 0; r < 3; r++) { const ry = -ch / 2 + (30 + r * 34) * k; ctx.fillStyle = [C.coral, C.ink, '#6FA3C9'][r]; ctx.beginPath(); ctx.arc(-cw / 2 + 30 * k, ry, 10 * k, 0, 7); ctx.fill(); ctx.fillStyle = C.stone; roundRect(ctx, -cw / 2 + 52 * k, ry - 7 * k, (130 - r * 18) * k, 14 * k, 7 * k); ctx.fill(); }
       ctx.restore();
     }
-    };
-    drawCard();
-    // Done
-    if (t > 2.5) { const pop = 1 + Math.exp(-(t - 2.5) * 9) * Math.sin((t - 2.5) * 30) * 0.12; pill(ctx, cx, stackTopY(L, R) - 80 * k, 'Done', k * 1.35, '#CDF05B', C.ink, pop); }
-    // tangled strand spills out of the opening
-    const spill = smooth((t - 2.75) / 0.8);
-    if (spill > 0) {
-      const Rn = rng(42), pts = []; const N = 160;
-      const ox = cx, oy = L.ground - 30 * k;
-      for (let i = 0; i <= N; i++) {
-        const u = i / N; const ang = u * Math.PI * 9 + Math.sin(u * 7) * 1.4;
-        const rad = (40 + 70 * Math.sin(u * Math.PI)) * k;
-        const along = u * 330 * k;
-        pts.push({ x: ox + along + Math.cos(ang) * rad * 0.9, y: oy + 60 * k * Math.sin(u * Math.PI * 0.8) + 50 * k * u + Math.sin(ang) * rad * 0.45 });
-      }
-      const n = Math.max(2, Math.floor(spill * N));
-      const strands = [[BANDS[0], 0], [BANDS[3], 1], [BANDS[2], 2]];
-      strands.forEach(([col, j]) => {
-        const ps = pts.slice(0, n).map((p, i) => ({ x: p.x + Math.sin(i * 0.35 + j * 2.1) * 9 * k, y: p.y + Math.cos(i * 0.31 + j * 1.7) * 9 * k, w: R.w * 0.42 }));
-        drawTube(ctx, L.W, L.H, ps, col, 200 + j);
-      });
-      if (t > 3.45) {
-        const qa = smooth((t - 3.45) / 0.15);
-        const qx = L.W - 110, qy = L.ground + 20 * k;
-        ctx.save(); ctx.globalAlpha = qa; ctx.translate(qx, qy); ctx.scale(0.7 + 0.3 * qa, 0.7 + 0.3 * qa);
-        ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(0, 0, 58 * k, 0, 7); ctx.fill(); ctx.lineWidth = 4 * k; ctx.strokeStyle = C.ink; ctx.stroke();
-        ctx.fillStyle = C.ink; ctx.font = `700 ${80 * k}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 0, 4 * k);
-        ctx.restore();
-      }
-    }
+    // peeled strands: from each cut point, sag down to the floor and pile up in loops (innermost band on top)
+    R.bands.forEach((b, i) => {
+      if (u[i] <= 0) return;
+      const P = cuts[i], hp = heap[i];
+      const n = Math.max(2, Math.floor(u[i] * (hp.length - 1)));
+      const Q = hp[n]; // strand enters the heap at its newest loop
+      const ctrl = { x: lerp(P.x, Q.x, 0.5) + 50 * k, y: Math.max(P.y, Q.y) + 40 * k };
+      const bridge = [];
+      const fade = u[i] > 0.97 ? 1 - (u[i] - 0.97) / 0.03 : 1; // bridge shortens to nothing as the band finishes
+      for (let q = 0; q <= 18; q++) { const s = q / 18; const a = (1 - s) * (1 - s), bb = 2 * (1 - s) * s, c = s * s; bridge.push({ x: a * P.x + bb * ctrl.x + c * Q.x, y: a * P.y + bb * ctrl.y + c * Q.y, w: b.w * 0.92 }); }
+      const pile = hp.slice(0, n + 1);
+      const path = fade < 1 ? pile : [...pile, ...bridge.reverse()];
+      drawTube(ctx, L.W, L.H, path, b.color, 200 + i);
+    });
+    // 3) "Done", popped over the mess
+    const DONE = U0 + 4 * STAG + DUR + 0.15;
+    if (t > DONE) { const d = t - DONE; const pop = 1 + Math.exp(-d * 8) * Math.sin(d * 26) * 0.14; pill(ctx, pc.x, pc.y - 230 * k, 'Done', k * 1.35, '#CDF05B', C.ink, pop); }
   },
 };
 
 function drawFrame(canvas, spotKey, ratio, t, logoImg) {
   const L = LAYOUT[ratio]; canvas.width = L.W; canvas.height = L.H;
   const ctx = canvas.getContext('2d');
-  if (t >= (SPOTS[spotKey].cut ?? 2.0)) { drawEndCard(ctx, L, logoImg); return; }
+  const sp = SPOTS[spotKey], cut = sp.cut ?? 2.0;
+  if (t >= cut) { drawEndCard(ctx, L, logoImg, sp.endCard || null, t - cut); return; }
   const R = rainbowRest(L);
   drawStage(ctx, L);
-  SPOTS[spotKey].draw(ctx, L, R, t);
-  const sp = SPOTS[spotKey];
-  drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null);
+  sp.draw(ctx, L, R, t);
+  drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null, sp.kickerScale ?? 0.62);
 }
 window.drawFrame = drawFrame;
