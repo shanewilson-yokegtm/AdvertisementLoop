@@ -3,9 +3,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { sb } from './supabase/browser';
 
 export type Member = { user_id: string; email: string; display_name: string; role: 'viewer' | 'creator' | 'approver' | 'admin' };
-export type Asset = { id: string; concept_name: string; kind: 'static' | 'motion' | 'video'; format: string; archived: boolean; archived_note: string | null; chat_id: string | null; latest_version: number; created_by: string | null; legacy_creator: string | null; created_at: string; updated_at: string };
+export type Asset = { id: string; concept_name: string; kind: 'static' | 'motion' | 'video'; format: string; archived: boolean; archived_note: string | null; chat_id: string | null; owner_id: string | null; latest_version: number; created_by: string | null; legacy_creator: string | null; created_at: string; updated_at: string };
 export type Version = { id: string; asset_id: string; version: number; parent_version_id: string | null; revision_note: string | null; file_path: string | null; poster_path: string | null; content_type: string | null; width: number | null; height: number | null; duration_sec: number | null; size_bytes: number | null; sha256: string | null; source: Record<string, any>; render: Record<string, any>; spec: any; copy: Record<string, any>; qa: any[]; created_by: string | null; legacy_creator: string | null; created_at: string };
-export type Comment = { id: string; asset_id: string; version_id: string; author: string | null; legacy_author: string | null; body: string; at_sec: number | null; status: string; applied_in: string | null; created_at: string; audio_path?: string | null; audio_sec?: number | null };
+export type Comment = { id: string; asset_id: string; version_id: string; author: string | null; legacy_author: string | null; body: string; at_sec: number | null; status: string; applied_in: string | null; created_at: string; audio_path?: string | null; audio_sec?: number | null; resolution_note?: string | null; resolved_by?: string | null; resolved_at?: string | null; source?: string | null; source_link?: string | null };
 export type Review = { version_id: string; status: 'approved' | 'changes'; note: string | null; reviewer: string | null; at: string };
 
 export const FORMATS: Record<string, { label: string; w: number; h: number }> = {
@@ -131,4 +131,26 @@ export async function saveVersion(input: {
   const { data, error } = await s.from('versions').insert(row).select('id,version').single();
   if (error) throw error;
   return { assetId, versionId: data.id as string, version: data.version as number };
+}
+
+/** Owner or admin: may revise, revert, process feedback, reject. Enforced by the database too. */
+export const canManage = (m: Member | null, a?: { owner_id: string | null } | null) => !!m && !!a && (m.role === 'admin' || (a.owner_id === m.user_id && can(m, 'creator')));
+
+export type InboxRow = { asset_id: string; concept_name: string; owner_id: string; owner_name: string; pending: number; latest_feedback_at: string; processing_status: string | null; processor: string | null };
+/** Feedback to process, computed on the server: 'mine' = ads I own; 'all' = admin queue. */
+export function useInbox(scope: 'mine' | 'all', enabled = true) {
+  const [rows, setRows] = useState<InboxRow[]>([]); const [ready, setReady] = useState(false);
+  const load = useCallback(async () => {
+    if (!enabled) { setRows([]); setReady(true); return; }
+    const { data, error } = await sb().rpc('feedback_inbox', { p_scope: scope });
+    if (!error) setRows((data || []) as InboxRow[]); setReady(true);
+  }, [scope, enabled]);
+  useEffect(() => {
+    load();
+    const ch = sb().channel('inbox-' + scope + Math.random().toString(36).slice(2))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => load()).subscribe();
+    const iv = setInterval(load, 30_000);
+    return () => { sb().removeChannel(ch); clearInterval(iv); };
+  }, [load, scope]);
+  return { rows, ready, reload: load, total: rows.reduce((n, r) => n + r.pending, 0) };
 }

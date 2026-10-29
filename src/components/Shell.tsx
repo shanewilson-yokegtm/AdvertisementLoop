@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useContext, useState, useCallback } from 'react';
-import { useMember, type Member } from '@/lib/data';
+import { useMember, useInbox, type Member } from '@/lib/data';
 import { sb } from '@/lib/supabase/browser';
 import Feedback from './Feedback';
 
@@ -18,6 +18,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const { member, loading, email } = useMember();
   const [msg, setMsg] = useState<string | null>(null);
   const toast = useCallback((s: string) => { setMsg(s); setTimeout(() => setMsg(null), 3200); }, []);
+  const inbox = useInbox('mine', !!member);
   if (path.startsWith('/login') || path.startsWith('/auth')) return <>{children}</>;
   const lib = path === '/' || path.startsWith('/a/');
   return (
@@ -25,7 +26,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <header className="top"><div className="wrap bar">
         <Link className="brand" href="/"><Logo />Ad Studio</Link>
         <nav className="main" aria-label="Main">
-          <Link href="/" aria-current={lib ? 'page' : undefined}>Library</Link>
+          <Link href="/" aria-current={lib ? 'page' : undefined}>Library{inbox.rows.length ? <span className="navcount" aria-label={`${inbox.rows.length} ads with feedback to process`}>{inbox.rows.length}</span> : null}</Link>
           <Link href="/create" aria-current={path.startsWith('/create') ? 'page' : undefined}>Create an ad</Link>
         </nav>
         <div className="me">
