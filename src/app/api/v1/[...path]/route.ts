@@ -3,6 +3,7 @@ import { serviceClient } from '@/lib/supabase/server';
 import { ApiError, authenticate, handle } from '@/lib/server/api';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
 
 async function run(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {

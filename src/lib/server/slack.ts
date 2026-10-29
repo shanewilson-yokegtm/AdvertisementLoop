@@ -6,6 +6,39 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type SlackApi = (method: string, args: Record<string, any>) => Promise<any>;
+/** Raw upload of file bytes to the URL Slack returns from files.getUploadURLExternal. */
+export type SlackUploader = (url: string, bytes: Uint8Array, filename: string) => Promise<boolean>;
+export const slackUploader: SlackUploader = async (url, bytes, filename) => {
+  const form = new FormData(); form.set('file', new Blob([bytes as any]), filename);
+  const r = await fetch(url, { method: 'POST', body: form });
+  return r.ok;
+};
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/** Upload the real video into the channel as the review post, so it plays in Slack. Returns the post's ts (thread root). */
+async function postVideo(db: SupabaseClient, slack: SlackApi, upload: SlackUploader, channel: string, path: string, filename: string, title: string, comment: string)
+  : Promise<{ ts?: string; reason?: string }> {
+  const { data: blob, error } = await db.storage.from('ad-assets').download(path);
+  if (error || !blob) return { reason: 'could not read the video file' };
+  if (blob.size > MAX_VIDEO_BYTES) return { reason: 'video is larger than 200 MB' };
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const u = await slack('files.getUploadURLExternal', { filename, length: bytes.length });
+  if (!u?.ok) return { reason: u?.error === 'missing_scope' ? 'missing_scope' : `Slack: ${u?.error || 'upload refused'}` };
+  if (!(await upload(u.upload_url, bytes, filename))) return { reason: 'upload to Slack failed' };
+  const c = await slack('files.completeUploadExternal', { files: [{ id: u.file_id, title }], channel_id: channel, initial_comment: comment });
+  if (!c?.ok) return { reason: c?.error === 'missing_scope' ? 'missing_scope' : `Slack: ${c?.error || 'could not post the video'}` };
+  // Slack shares the file asynchronously; the share's ts is the thread replies attach to.
+  for (let i = 0; i < 10; i++) {
+    const info = await slack('files.info', { file: u.file_id });
+    if (info?.ok === false && info.error === 'missing_scope') return { reason: 'missing_scope' };
+    const sh = info?.file?.shares || {};
+    const ts = sh.private?.[channel]?.[0]?.ts || sh.public?.[channel]?.[0]?.ts;
+    if (ts) return { ts };
+    await sleep(800);
+  }
+  return { reason: 'video posted but Slack did not return its thread in time' };
+}
 export function slackApi(token: string, fetcher: typeof fetch = fetch): SlackApi {
   // Form-encoded for every method: Slack ignores JSON bodies on read methods (users.conversations, users.info,
   // chat.getPermalink, users.lookupByEmail), which silently drops arguments such as types=private_channel.
@@ -51,7 +84,7 @@ export async function memberForSlackUser(db: SupabaseClient, slack: SlackApi, us
 export type ShareInput = { asset_id: string; version_id: string; channel_id: string; question?: string | null; idempotency_key: string };
 
 /** Post one exact version. Retrying with the same idempotency key never posts twice once Slack accepted it. */
-export async function shareVersion(db: SupabaseClient, slack: SlackApi, actor: { user_id: string; role: string; display_name: string }, input: ShareInput, appUrl: string) {
+export async function shareVersion(db: SupabaseClient, slack: SlackApi, actor: { user_id: string; role: string; display_name: string }, input: ShareInput, appUrl: string, upload: SlackUploader = slackUploader) {
   const { data: asset } = await db.from('assets').select('id, concept_name, owner_id, kind, format').eq('id', input.asset_id).maybeSingle();
   if (!asset) return { status: 404, body: { error: 'not_found' } };
   if (!(actor.role === 'admin' || (asset.owner_id === actor.user_id && actor.role !== 'viewer'))) return { status: 403, body: { error: 'forbidden', message: 'Only the owner or an admin can share this ad. You can leave a comment instead.' } };
@@ -79,7 +112,17 @@ export async function shareVersion(db: SupabaseClient, slack: SlackApi, actor: {
     ...(preview ? [{ type: 'image', image_url: preview, alt_text: `${asset.concept_name} v${v.version}` }] : []),
     { type: 'context', elements: [{ type: 'mrkdwn', text: 'Reply in this thread. Replies are saved as feedback on this exact version in Ad Studio.' }] },
   ];
-  const res = await slack('chat.postMessage', { channel: input.channel_id, text, blocks, unfurl_links: false });
+  // Videos are posted as the real file so they play in Slack; images and fallbacks use a message with a preview.
+  let res: any = null; let note: string | null = null;
+  if (v.content_type?.startsWith('video/') && v.file_path) {
+    const ext = v.file_path.split('.').pop() || 'mp4';
+    const slug = asset.concept_name.replace(/[^\w -]/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'ad';
+    const comment = `*<${link}|${asset.concept_name}>* · v${v.version}\nShared by ${actor.display_name}${post.question ? `\n> ${post.question.replace(/\n/g, '\n> ')}` : ''}\n_Reply in this thread. Replies are saved as feedback on this exact version in Ad Studio._`;
+    const vr = await postVideo(db, slack, upload, input.channel_id, v.file_path, `${slug}-v${v.version}.${ext}`, `${asset.concept_name} · v${v.version}`, comment);
+    if (vr.ts) res = { ok: true, channel: input.channel_id, ts: vr.ts };
+    else note = vr.reason === 'missing_scope' ? 'Posted the poster, not the video: the Slack app needs the files:write and files:read permissions.' : `Posted the poster, not the video (${vr.reason}).`;
+  }
+  if (!res) res = await slack('chat.postMessage', { channel: input.channel_id, text, blocks, unfurl_links: false });
   if (!res?.ok) {
     const err = res?.error === 'not_in_channel' || res?.error === 'channel_not_found' ? 'The Yoke Slack app is not in that channel. Invite it first.' : `Slack: ${res?.error || 'error'}`;
     await db.from('slack_posts').update({ state: 'failed', error: err, attempts: (post.attempts || 0) + 1, updated_at: new Date().toISOString() }).eq('id', post.id);
@@ -88,7 +131,7 @@ export async function shareVersion(db: SupabaseClient, slack: SlackApi, actor: {
   const pl = await slack('chat.getPermalink', { channel: res.channel, message_ts: res.ts });
   const upd = await db.from('slack_posts').update({ state: 'sent', ts: res.ts, channel_id: res.channel, permalink: pl?.permalink || null, error: null, attempts: (post.attempts || 0) + 1, updated_at: new Date().toISOString() }).eq('id', post.id).select('*').single();
   await db.from('shares').insert({ asset_id: asset.id, version_id: v.id, channel: input.channel_id, note: post.question, link: pl?.permalink || link, shared_by: actor.user_id });
-  return { status: 200, body: upd.data };
+  return { status: 200, body: { ...upd.data, video: !note && !!v.content_type?.startsWith('video/'), note } };
 }
 
 /** Handle one verified Events API payload. Returns a short outcome string (also logged per event id). */

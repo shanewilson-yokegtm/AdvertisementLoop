@@ -48,7 +48,7 @@ export default function Share({ a, v, onClose }: { a: Asset; v: Version; onClose
       if (!r.ok) { setMsg(j.message || j.error || 'Slack post failed · try again'); return; }
       try { localStorage.setItem('shareChannelId', channelId); } catch { /* ignore */ }
       const name = channels?.find(c => c.id === channelId)?.name;
-      toast(`Posted v${v.version} to #${name || 'channel'} · replies come back here`); onClose();
+      toast(j.note ? j.note : `Posted v${v.version}${j.video ? ' (video)' : ''} to #${name || 'channel'} · replies come back here`); onClose();
     }}>
       <div className="head" style={{ margin: 0 }}><h2 id="shT">Share for review</h2><button type="button" className="btn" onClick={onClose}>Close</button></div>
       <div><b>{a.concept_name}</b> <span className="muted">v{v.version}</span></div>

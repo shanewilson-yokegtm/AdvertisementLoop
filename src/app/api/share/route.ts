@@ -3,6 +3,7 @@ import { currentMember, serviceClient } from '@/lib/supabase/server';
 import { shareVersion, slackApi } from '@/lib/server/slack';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
 
 // Share an exact version to a Slack channel the user picked. Requires the Yoke Slack app (bot token) and the server key.
 export async function POST(req: Request) {

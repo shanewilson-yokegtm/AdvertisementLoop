@@ -57,6 +57,7 @@ export function pgClient(db) {
     from, rpc, objects,
     storage: { from: () => ({
       createSignedUrl: async p => ({ data: { signedUrl: 'https://signed.example/' + p }, error: null }),
+      download: async p => ({ data: new Blob([Buffer.from('fake-video-bytes:' + p)], { type: 'video/mp4' }), error: null }),
       createSignedUrls: async ps => ({ data: ps.map(p => ({ path: p, signedUrl: 'https://signed.example/' + p })), error: null }),
       createSignedUploadUrl: async p => ({ data: { signedUrl: 'https://upload.example/' + p, path: p, token: 't' }, error: null }),
       list: async (folder, o) => ({ data: [...objects.entries()].filter(([k]) => k === folder + '/' + o.search).map(([k, m]) => ({ name: k.split('/').pop(), metadata: m })), error: null }),
