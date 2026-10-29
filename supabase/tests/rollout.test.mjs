@@ -51,6 +51,7 @@ function reviewFixture(initial = [v1], query = '') {
     '@/components/Chips': { statusChip: () => null, renderChip: () => null },
     '@/components/Upload': { __esModule: true, default: () => null },
     '@/components/Share': { __esModule: true, default: () => null },
+    '@/components/VoiceNote': { __esModule: true, default: () => null },
   };
   Page = source('src/app/a/[id]/page.tsx', mocks).default;
   return { Page, rows, writes, render };

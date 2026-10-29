@@ -29,6 +29,7 @@ await db.exec(`
 `);
 await db.exec(migration);
 await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collaborator_review_reliability.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029190001_voice_comments.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
@@ -86,6 +87,9 @@ await allowed('creator comments', TENG, `insert into comments(asset_id,version_i
 ok('comment author bound', (await db.query(`select author from comments`)).rows[0].author === TENG);
 await allowed('comment status change', SHANE, `update comments set status='applied', applied_in='ast_t_v2'`);
 await denied('comment text is fixed', SHANE, `update comments set body='edited'`);
+await allowed('voice note comment', TENG, `insert into comments(asset_id,version_id,body,at_sec,audio_path,audio_sec) values ('ast_t','ast_t_v1','Voice note',1.5,'comments/ast_t/a.webm',12.4)`);
+await denied('voice note must live under its ad', TENG, `insert into comments(asset_id,version_id,body,audio_path,audio_sec) values ('ast_t','ast_t_v1','Voice note','ast_other/a.webm',3)`);
+await denied('voice note audio is fixed', SHANE, `update comments set audio_path='comments/ast_t/b.webm' where audio_path is not null`);
 await denied('creator cannot approve', TENG, `insert into reviews(version_id,status) values ('ast_t_v1','approved')`);
 await allowed('admin approves', SHANE, `insert into reviews(version_id,status,reviewer) values ('ast_t_v1','approved','${TENG}')`);
 ok('review by bound to approver', (await db.query(`select reviewer from reviews`)).rows[0].reviewer === SHANE);

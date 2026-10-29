@@ -10,6 +10,7 @@ import { useApp } from '@/components/Shell';
 import Upload from '@/components/Upload';
 import Share from '@/components/Share';
 import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
+import VoiceNote from '@/components/VoiceNote';
 
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,6 +34,7 @@ function AssetDetail({ id }: { id: string }) {
   useEffect(() => { if (versions.ready && latest && !sel) setSel(latest.id); }, [versions.ready, latest?.id, sel]);
   const v = vs.find(x => x.id === selectedId);
   const urls = useSigned(v ? [v.file_path, v.poster_path] : []);
+  const audioUrls = useSigned(comments.rows.map(c => c.audio_path));
   const selectVersion = (versionId: string) => {
     setNote(''); setCmt(''); setAtHead(false); setShare(false);
     router.replace(assetVersionPath(id, versionId), { scroll: false });
@@ -96,7 +98,8 @@ function AssetDetail({ id }: { id: string }) {
           {!comments.rows.length ? <div className="muted">No comments yet</div> : comments.rows.map(c => { const cv = vs.find(x => x.id === c.version_id);
             return <div className="cmt" key={c.id}><div className="row"><b>{who(c.author, c.legacy_author)}</b><span className="muted">v{cv?.version ?? '?'}{c.at_sec != null ? ' · at ' + fmtSec(c.at_sec) : ''} · {fmtDate(c.created_at)}</span>
               {c.status === 'applied' ? <span className="chip ok">Applied</span> : c.status === 'dismissed' ? <span className="chip">Dismissed</span> : <span className="chip warn">Open</span>}</div>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
+              {c.audio_path ? <audio controls preload="none" src={audioUrls[c.audio_path]} style={{ width: '100%' }} aria-label={`Voice note from ${who(c.author, c.legacy_author)}`} /> : null}
+              {c.audio_path && c.body === 'Voice note' ? null : <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>}
               {c.status === 'open' && can(member, 'creator') ? <div><button className="btn small" onClick={async () => { const { error } = await sb().from('comments').update({ status: 'dismissed' }).eq('id', c.id); if (error) toast(error.message); }}>Dismiss</button></div> : null}</div>; })}
           {can(member, 'creator') ? <form className="panel" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t) return;
               const pv = document.getElementById('pv') as HTMLVideoElement | null;
@@ -105,6 +108,8 @@ function AssetDetail({ id }: { id: string }) {
             <label className="sr" htmlFor="cmt">Comment</label><textarea id="cmt" rows={2} placeholder="Headline too long on 9:16" value={cmt} onChange={e => setCmt(e.target.value)} />
             <div className="row" style={{ justifyContent: 'space-between' }}>{isVideo(v) ? <label className="row"><input type="checkbox" checked={atHead} onChange={e => setAtHead(e.target.checked)} /> At playhead</label> : <span />}<button className="btn primary">Comment</button></div>
           </form> : null}
+          {can(member, 'creator') ? <VoiceNote assetId={a.id} versionId={v.id} toast={toast}
+            playheadSec={() => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return isVideo(v) && pv ? Math.round(pv.currentTime * 10) / 10 : null; }} /> : null}
         </section>
         <details><summary style={{ cursor: 'pointer', fontWeight: 650 }}>Copy, checks and file</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
