@@ -38,7 +38,7 @@ const asset = { id: 'asset', concept_name: 'Test ad', kind: 'static', format: 's
 let member = { user_id: 'shane', role: 'admin' };
 
 function reviewFixture(initial = [v1], query = '') {
-  const writes = []; const pushed = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [], revision_jobs: [], processing: [] };
+  const writes = []; const pushed = []; const rows = { assets: [asset], versions: initial, reviews: [], comments: [], shares: [], revision_jobs: [], processing: [], higgsfield_jobs: [] };
   let Page;
   const render = () => root.render(React.createElement(Page));
   const mocks = {
@@ -47,6 +47,7 @@ function reviewFixture(initial = [v1], query = '') {
     '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {} },
     '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }) },
     '@/components/ChangeLog': { __esModule: true, default: () => null },
+    '@/components/Higgsfield': { useHiggsfieldPoll: () => {} },
     '@/lib/supabase/browser': { sb: () => ({ from: table => ({ upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
     '@/components/Shell': { useApp: () => ({ member, toast: () => {} }) },
     '@/components/Media': { Player: ({ v }) => React.createElement('div', { id: 'selected-media' }, v.id) },
@@ -217,6 +218,7 @@ function chatFixture(messages = []) {
     '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, fmtDate: () => '', FORMATS: {}, KIND_LABEL: {} },
     '@/lib/supabase/browser': { sb: () => ({ from: table => ({ insert: async row => { inserts.push({ table, ...row }); return { error: null }; } }) }) },
     '@/lib/render': {}, './Media': {}, './Shell': { useApp: () => ({ member, toast: () => {} }) },
+    './Higgsfield': { useHiggsfieldOn: () => false, HiggsfieldForm: () => null },
   };
   const Chat = source('src/components/Create.tsx', mocks).ChatView;
   return { Page: () => React.createElement(Chat, { id: 'chat' }), inserts };
@@ -295,4 +297,32 @@ test('renewing the same video URL preserves its playhead and playback intent', a
     video.dispatchEvent(new window.Event('loadedmetadata'));
     assert.equal(video.currentTime, 7); assert.equal(plays, 1); await finish();
   } finally { proto.load = load; proto.play = play; }
+});
+
+test('Higgsfield form: 9 s default, 4-12 s, 720p, sound toggle, one request per press', async () => {
+  const pushed = []; const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+    if (url === '/api/higgsfield/usage') return new Response(JSON.stringify({ seconds_this_month: 14, generations_this_month: 1, monthly_cap_seconds: null }));
+    return new Response(JSON.stringify({ asset_id: 'ast_x', version_id: 'ast_x_v1', job_id: 'j', status: 'submitted' }));
+  };
+  if (!globalThis.crypto?.randomUUID) globalThis.crypto = require('node:crypto').webcrypto;
+  const { HiggsfieldForm } = source('src/components/Higgsfield.tsx', { 'next/navigation': { useRouter: () => ({ push: u => pushed.push(u) }) } });
+  await mount(() => React.createElement(HiggsfieldForm, { toast: () => {} }));
+  await act(async () => {});
+  const range = document.querySelector('input[type=range]');
+  assert.equal(range.value, '9'); assert.equal(range.min, '4'); assert.equal(range.max, '12');
+  assert.match(document.body.textContent, /720p/); assert.match(document.body.textContent, /14s made this month/);
+  assert.ok(document.querySelector('input[role=switch]'));
+  assert.equal(button('Generate 9s video').disabled, true, 'needs a prompt');
+  const ta = document.querySelector('textarea');
+  const setVal = (el, v) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v); el.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  await act(async () => setVal(ta, 'A rep closes the laptop'));
+  await act(async () => { document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+  const gen = calls.filter(c => c.url === '/api/higgsfield/generate');
+  assert.equal(gen.length, 1);
+  assert.equal(gen[0].body.duration, 9); assert.equal(gen[0].body.format, 'vertical'); assert.equal(gen[0].body.audio, true); assert.ok(gen[0].body.idempotency_key);
+  assert.deepEqual(pushed, ['/a/ast_x?v=ast_x_v1']);
+  globalThis.fetch = realFetch; await finish();
 });

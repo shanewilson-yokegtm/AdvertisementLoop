@@ -81,3 +81,16 @@ Conversations stop accepting new messages at 60 stored messages and offer **Star
 Private media access renews automatically in open tabs and when returning to a tab. Renewal preserves the video playhead and playback intent.
 
 Apply `20261029154845_collaborator_review_reliability.sql` before deploying this update. It adds reply deduplication and approval readiness checks without changing member roles or the manual app-feedback review process. `npm test` covers permissions, review version selection, recovery, conversation rollover, and media renewal. Claude generation and Higgsfield still require their separately configured connections.
+
+## Higgsfield video (Seedance 2.5)
+
+Create an ad → **Higgsfield video**. Any creator can generate. Settings are fixed by Shane: 4–12 s (default 9), always
+720p (the highest Seedance 2.5 offers), sound on/off toggle, format vertical 9:16 / feed 3:4 / square 1:1 / landscape 16:9.
+
+- `HF_CREDENTIALS` (`key-id:key-secret`) lives only in Vercel. The browser never sees it.
+- One press = one request: the POST to Higgsfield is never retried, and a repeated press reuses the same idempotency key.
+- A "Rendering in Higgsfield" version appears at once. Higgsfield calls `/api/higgsfield/webhook?job=…` when done (the
+  body is ignored; the server re-checks Higgsfield itself), and the ad page also checks every 10 s. The MP4 is copied
+  into Supabase storage and filled into that same version exactly once. Moderated, failed or out-of-credit requests
+  show "Render failed" with the reason; nothing is called a success unless a real MP4 arrived.
+- Usage (seconds this month) shows under the form. Optional cap: set `HIGGSFIELD_MONTHLY_SECONDS` in Vercel.

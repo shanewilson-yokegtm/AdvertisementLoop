@@ -10,7 +10,7 @@ export type Actor = { user_id: string; role: 'viewer' | 'creator' | 'approver' |
 export class ApiError extends Error { constructor(public status: number, public code: string, msg: string) { super(msg); } }
 
 const RANK = ['none', 'viewer', 'creator', 'approver', 'admin'];
-const atLeast = (a: Actor, r: string) => RANK.indexOf(a.role) >= RANK.indexOf(r);
+export const atLeast = (a: Actor, r: string) => RANK.indexOf(a.role) >= RANK.indexOf(r);
 export const MEDIA_TYPES: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
   'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3',
@@ -47,7 +47,7 @@ async function canManage(db: SupabaseClient, a: Actor, assetId: string) {
   const { data } = await db.from('assets').select('owner_id').eq('id', assetId).maybeSingle();
   return !!data && data.owner_id === a.user_id;
 }
-async function requireManage(db: SupabaseClient, a: Actor, assetId: string) {
+export async function requireManage(db: SupabaseClient, a: Actor, assetId: string) {
   const { data } = await db.from('assets').select('id').eq('id', assetId).maybeSingle();
   if (!data) throw new ApiError(404, 'not_found', `Asset ${assetId} not found`);
   if (!(await canManage(db, a, assetId))) throw new ApiError(403, 'forbidden', 'Only the owner or an admin can change this ad. You can leave a comment instead.');

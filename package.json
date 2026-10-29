@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "node supabase/tests/skill.e2e.mjs",
-    "test": "node supabase/tests/schema.test.mjs && node supabase/tests/ownership.test.mjs && node supabase/tests/api.test.mjs && node supabase/tests/slack.test.mjs && node --test supabase/tests/rollout.test.mjs"
+    "test": "node supabase/tests/schema.test.mjs && node supabase/tests/ownership.test.mjs && node supabase/tests/api.test.mjs && node supabase/tests/slack.test.mjs && node supabase/tests/higgsfield.test.mjs && node --test supabase/tests/rollout.test.mjs"
   },
   "dependencies": {
     "@higgsfield/client": "^0.2.6",

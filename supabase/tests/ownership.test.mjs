@@ -234,5 +234,15 @@ await db.exec(`insert into assets(id,concept_name,kind,format,created_by,owner_i
 ok('older versions show the comments used in them', (await q(HENRY, `select change_log('ast_leg') l`))[0].l.find(e => e.version === 2).round.accepted[0].body === 'Make the logo bigger');
 ok('drafts are not in the change log', !JSON.stringify((await q(HENRY, `select change_log('ast_ok') l`))[0].l).includes('"note":"From'));
 
+// ---------- Higgsfield rendering versions ----------
+await allowed('member saves a rendering version', HENRY, `insert into assets(id,concept_name,kind,format) values ('ast_hf','HF','video','vertical'); insert into versions(id,asset_id,version,render) values ('x','ast_hf',0,'{"state":"rendering","label":"Rendering in Higgsfield"}')`);
+await as(HENRY, `update versions set file_path='ast_hf/x.mp4', render='{"state":"ready"}' where id='ast_hf_v1'`).catch(() => {});
+ok('a member cannot fill in a rendering version', (await val(`select file_path from versions where id='ast_hf_v1'`))[0].file_path === null);
+await db.exec(`update versions set file_path='ast_hf/v1.mp4', content_type='video/mp4', render='{"state":"ready","kind":"higgsfield"}' where id='ast_hf_v1'`);
+ok('the server fills in a rendering version once', (await val(`select file_path, render->>'state' s from versions where id='ast_hf_v1'`))[0].s === 'ready');
+try { await db.exec(`update versions set file_path='ast_hf/other.mp4' where id='ast_hf_v1'`); ok('a finished version cannot be changed again', false); } catch { ok('a finished version cannot be changed again', true); }
+try { await db.exec(`update versions set revision_note='x', file_path='ast_hf/v1.mp4' where id='ast_teng_v1'`); ok('ready versions stay immutable for the server', false); } catch { ok('ready versions stay immutable for the server', true); }
+await denied('members cannot create Higgsfield jobs directly', HENRY, `insert into higgsfield_jobs(asset_id,version_id,requested_by,idempotency_key,prompt,duration,aspect_ratio) values ('ast_hf','ast_hf_v1','${HENRY}','k','p',9,'9:16')`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

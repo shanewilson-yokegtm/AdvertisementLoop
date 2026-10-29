@@ -13,6 +13,8 @@ export function pgClient(db) {
       update(row) { st.op = 'update'; st.row = row; return b; },
       upsert(row) { st.op = 'upsert'; st.row = row; return b; },
       eq(k, v) { st.where.push(`${col(k)} = ${q(v)}`); return b; },
+      in(k, vs) { st.where.push(`${col(k)} in (${vs.map(q).join(',')})`); return b; },
+      gte(k, v) { st.where.push(`${col(k)} >= ${q(v)}`); return b; },
       match(o) { Object.entries(o).forEach(([k, v]) => b.eq(k, v)); return b; },
       order(k, o = {}) { st.order = `${col(k)} ${o.ascending === false ? 'desc' : 'asc'}`; return b; },
       limit(n) { st.limit = n; return b; },
@@ -60,6 +62,7 @@ export function pgClient(db) {
       download: async p => ({ data: new Blob([Buffer.from('fake-video-bytes:' + p)], { type: 'video/mp4' }), error: null }),
       createSignedUrls: async ps => ({ data: ps.map(p => ({ path: p, signedUrl: 'https://signed.example/' + p })), error: null }),
       createSignedUploadUrl: async p => ({ data: { signedUrl: 'https://upload.example/' + p, path: p, token: 't' }, error: null }),
+      upload: async (p, bytes, o) => { if (objects.has(p)) return { data: null, error: { message: 'exists' } }; objects.set(p, { size: bytes.byteLength ?? bytes.size, mimetype: o?.contentType }); return { data: { path: p }, error: null }; },
       list: async (folder, o) => ({ data: [...objects.entries()].filter(([k]) => k === folder + '/' + o.search).map(([k, m]) => ({ name: k.split('/').pop(), metadata: m })), error: null }),
     }) },
   };

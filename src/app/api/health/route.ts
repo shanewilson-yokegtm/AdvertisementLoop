@@ -6,7 +6,7 @@ export async function GET() {
   return NextResponse.json({
     configured: {
       supabaseUrl: has('NEXT_PUBLIC_SUPABASE_URL'), supabaseAnonKey: has('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-      supabaseServiceKey: has('SUPABASE_SERVICE_ROLE_KEY'), claude: has('ANTHROPIC_API_KEY'), slack: has('SLACK_BOT_TOKEN'),
+      supabaseServiceKey: has('SUPABASE_SERVICE_ROLE_KEY'), claude: has('ANTHROPIC_API_KEY'), slack: has('SLACK_BOT_TOKEN'), higgsfield: has('HF_CREDENTIALS'),
     },
     connectionsTested: false,
   });

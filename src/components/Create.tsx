@@ -3,27 +3,27 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
-import { useRows, useSigned, useMembers, can, fmtDate, FORMATS, KIND_LABEL, saveVersion, type Asset, type Version } from '@/lib/data';
+import { useRows, useSigned, useMembers, can, fmtDate, FORMATS, KIND_LABEL, saveVersion, canManage, type Asset, type Version } from '@/lib/data';
 // @ts-ignore -- plain JS canvas renderers
 import { renderStatic, renderMotion } from '@/lib/render';
 import { Thumb } from './Media';
 import { useApp } from './Shell';
+import { HiggsfieldForm, useHiggsfieldOn } from './Higgsfield';
 import { assetVersionPath, CHAT_LIMIT_MESSAGE, CHAT_MESSAGE_LIMIT } from '@/lib/creative-loop';
 
 type CType = 'static' | 'motion' | 'higgsfield';
 type Attempt = { messageId: string; body: string; type: CType; saved: boolean; made: { asset_id: string; version_id: string }[]; blocked: string | null; turn: any[] };
 const TYPES: [CType, string][] = [['static', 'Static'], ['motion', 'Infographic video'], ['higgsfield', 'Higgsfield video']];
-const HIGGSFIELD_CONNECTED = false;
-const HF_REQ = "Higgsfield isn't connected. A claude.ai Owner must add the Higgsfield connector (mcp.higgsfield.ai/mcp) on Yoke's existing Higgsfield account, and Shane must approve a budget. Until then your idea is saved as a pending Library item; no video is made.";
+const HF_REQ = "Higgsfield isn't switched on for this app yet (HF_CREDENTIALS missing on the server). Your idea is saved as a pending Library item; no video is made.";
 
-function TypeBar({ value, onChange }: { value: CType; onChange: (t: CType) => void }) {
+function TypeBar({ value, onChange, hf }: { value: CType; onChange: (t: CType) => void; hf: boolean | null }) {
   return <div className="typebar" role="radiogroup" aria-label="What to make">
     {TYPES.map(([k, l], i) => <button key={k} type="button" role="radio" aria-checked={value === k} tabIndex={value === k ? 0 : -1} className="tbtn"
       onClick={() => onChange(k)} onKeyDown={e => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const n = TYPES[(i + (e.key === 'ArrowRight' ? 1 : 2)) % 3][0]; onChange(n); (e.currentTarget.parentElement?.children[TYPES.findIndex(x => x[0] === n)] as HTMLElement)?.focus(); } }}>
-      {l}{k === 'higgsfield' && !HIGGSFIELD_CONNECTED ? <span className="tnote"> · not connected</span> : null}</button>)}
+      {l}{k === 'higgsfield' && hf === false ? <span className="tnote"> · not connected</span> : null}</button>)}
   </div>;
 }
-const TypeNote = ({ t }: { t: CType }) => (t === 'higgsfield' && !HIGGSFIELD_CONNECTED ? <div className="banner">{HF_REQ}</div> : null);
+const TypeNote = ({ t, hf }: { t: CType; hf: boolean | null }) => (t === 'higgsfield' && hf === false ? <div className="banner">{HF_REQ}</div> : null);
 // Claude replies are on only when the server has an API key (checked via /api/health).
 function useClaudeOn() {
   const [on, setOn] = useState<boolean | null>(null);
@@ -36,11 +36,14 @@ export function CreateHome() {
   const { member, toast } = useApp(); const router = useRouter(); const who = useMembers();
   const chats = useRows<any>('chats', { order: 'updated_at' });
   const [t, setT] = useState<CType>('static'); const [text, setText] = useState(''); const [busy, setBusy] = useState(false);
-  const claudeOn = useClaudeOn();
+  const claudeOn = useClaudeOn(); const hf = useHiggsfieldOn();
+  const hfForm = t === 'higgsfield' && hf;
   return <>
     <div className="head"><h1>Create an ad</h1>{claudeOn === false ? <span className="chip">Claude: off</span> : claudeOn ? <span className="chip live">Claude: on</span> : null}</div>
     <div style={{ marginBottom: 12 }}><ClaudeOff on={claudeOn} /></div>
     {!can(member, 'creator') ? <div className="banner" style={{ marginBottom: 12 }}>View-only access · ask Shane for Creator</div> : null}
+    {hfForm ? <div className="composer panel"><TypeBar value={t} onChange={setT} hf={hf} />
+      <HiggsfieldForm initialPrompt={text} disabled={!can(member, 'creator')} toast={toast} /></div> :
     <form className="composer panel" onSubmit={async e => {
       e.preventDefault(); const body = text.trim(); if (!body || busy || !can(member, 'creator')) return; setBusy(true);
       try {
@@ -51,10 +54,10 @@ export function CreateHome() {
       } catch { toast('Couldn’t start. Your idea is still here; please retry.'); }
       finally { setBusy(false); }
     }}>
-      <TypeBar value={t} onChange={setT} /><TypeNote t={t} />
+      <TypeBar value={t} onChange={setT} hf={hf} /><TypeNote t={t} hf={hf} />
       <label className="f">What&apos;s the ad?<textarea rows={3} value={text} onChange={e => setText(e.target.value)} placeholder="Owners who keep saying they'll follow up next week" /></label>
       <div className="row" style={{ justifyContent: 'space-between' }}><span className="muted">Pick a type, describe the idea. Drafts land in the Library.</span><button className="btn primary" disabled={busy || !can(member, 'creator')}>Start</button></div>
-    </form>
+    </form>}
     {chats.rows.length ? <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 8 }}><h2>Ads in progress</h2>
       <div className="list">{chats.rows.map((c: any) => <Link className="li" key={c.id} href={`/create/${c.id}`}><div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><b>{c.title}</b>
         <span className="muted">{who(c.last_by || c.created_by)} · {fmtDate(c.updated_at)}{c.asset_id ? ' · iterating a Library asset' : ''}</span></div></Link>)}</div></div> : null}
@@ -75,7 +78,7 @@ export function ChatView({ id }: { id: string }) {
   const vById = Object.fromEntries(versions.rows.map(v => [v.id, v])); const aById = Object.fromEntries(assets.rows.map(a => [a.id, a]));
   const refs = msgs.rows.flatMap((m: any) => m.asset_refs || []);
   const urls = useSigned(refs.map((r: any) => { const v = vById[r.version_id]; return v ? (v.poster_path || (v.content_type?.startsWith('image/') ? v.file_path : null)) : null; }));
-  const started = useRef(false); const claudeOn = useClaudeOn();
+  const started = useRef(false); const claudeOn = useClaudeOn(); const hf = useHiggsfieldOn();
 
   const setType = (k: CType) => { setT(k); if (can(member, 'creator')) sb().from('chats').update({ create_type: k }).eq('id', id).then(() => {}); };
 
@@ -92,7 +95,7 @@ export function ChatView({ id }: { id: string }) {
       if (error && error.code !== '23505') throw error;
       attempt.saved = true;
     }
-    if (ty === 'higgsfield' && !HIGGSFIELD_CONNECTED) {
+    if (ty === 'higgsfield' && !hf) {
       attempt.blocked = 'higgsfield_not_connected';
       if (!made.length) {
       try { const r = await saveVersion({ assetId: chat?.asset_id && aById[chat.asset_id]?.kind === 'video' ? chat.asset_id : null, newAsset: { concept_name: (chat?.title || body).slice(0, 70), kind: 'video', format: 'vertical', chat_id: id },
@@ -177,12 +180,17 @@ export function ChatView({ id }: { id: string }) {
     </div>
     {atLimit ? <div className="banner" role="status"><span>{CHAT_LIMIT_MESSAGE}</span><button className="btn primary" disabled={busy || !can(member, 'creator')} onClick={startNextChat}>Start a new chat</button></div> : null}
     {retry ? <div className="banner" role="status"><span>{status}</span><button className="btn" disabled={busy} onClick={() => send(retry.body, retry.type, retry)}>Retry saved request</button><button className="btn" disabled={busy} onClick={() => { setRetry(null); setStatus('You can continue with another message.'); }}>Continue chatting</button></div> : null}
+    {type === 'higgsfield' && hf ? (() => { const linked = chat.asset_id ? aById[chat.asset_id] : null; const own = linked && linked.kind === 'video' && canManage(member, linked) ? linked : null;
+      const lastIdea = [...msgs.rows].reverse().find((m: any) => m.role === 'user')?.body || '';
+      return <div className="composer"><TypeBar value={type} onChange={setType} hf={hf} />
+        {own ? <span className="muted">New version of {own.concept_name}</span> : null}
+        <HiggsfieldForm assetId={own?.id || null} conceptName={chat.title} initialPrompt={lastIdea} chatId={id} disabled={!can(member, 'creator')} toast={toast} /></div>; })() :
     <form className="composer" onSubmit={e => { e.preventDefault(); const b = text.trim(); if (!b || busy || atLimit || retry) return; setText(''); send(b, type); }}>
-      <ClaudeOff on={claudeOn} /><TypeBar value={type} onChange={setType} /><TypeNote t={type} />
+      <ClaudeOff on={claudeOn} /><TypeBar value={type} onChange={setType} hf={hf} /><TypeNote t={type} hf={hf} />
       <label htmlFor="cmp" className="sr">Message</label>
       <textarea id="cmp" rows={2} disabled={atLimit} value={text} onChange={e => setText(e.target.value)} placeholder="Describe the ad, or what to change"
         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} />
       <div className="row" style={{ justifyContent: 'space-between' }}><span className="muted" role="status">{retry ? '' : status}</span><button className="btn primary" disabled={busy || atLimit || !!retry || !can(member, 'creator')}>Send</button></div>
-    </form>
+    </form>}
   </div>;
 }

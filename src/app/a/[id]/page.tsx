@@ -13,6 +13,7 @@ import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
 import { useRecorder, saveVoiceComment, RecordControl } from '@/components/VoiceNote';
 import ProcessFeedback, { type Processing } from '@/components/Process';
 import ChangeLog from '@/components/ChangeLog';
+import { useHiggsfieldPoll } from '@/components/Higgsfield';
 
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,6 +39,9 @@ function AssetDetail({ id }: { id: string }) {
   const urls = useSigned(v ? [v.file_path, v.poster_path] : []);
   const audioUrls = useSigned(comments.rows.map(c => c.audio_path));
   const jobs = useRows<any>('revision_jobs', { filter: ['asset_id', id], order: 'created_at' });
+  const hfJobs = useRows<any>('higgsfield_jobs', { filter: ['asset_id', id], order: 'created_at' });
+  const hfLive = hfJobs.rows.find((j: any) => j.status === 'submitted');
+  useHiggsfieldPoll(hfLive?.id || null, () => { hfJobs.reload(); versions.reload(); });
   const procs = useRows<Processing>('processing', { filter: ['asset_id', id], order: 'created_at', asc: true });
   const playhead = () => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return pv ? Math.round(pv.currentTime * 10) / 10 : null; };
   // Voice is the primary way to review: the live transcript fills the note box, the audio is kept with it.

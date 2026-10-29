@@ -5,6 +5,7 @@ export function statusChip(st: string) {
 }
 export function renderChip(v: Version) {
   const r = v.render || {}; if (r.state === 'pending') return <span className="chip warn">{r.label || 'Pending'}</span>;
-  if (r.state === 'rendering') return <span className="chip live">Rendering</span>; return null;
+  if (r.state === 'rendering') return <span className="chip live">Rendering</span>;
+  if (r.state === 'failed') return <span className="chip err">Render failed</span>; return null;
 }
 
