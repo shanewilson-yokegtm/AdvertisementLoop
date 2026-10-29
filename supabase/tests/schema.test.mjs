@@ -28,6 +28,7 @@ await db.exec(`
   grant usage on schema public to anon, authenticated, service_role;
 `);
 await db.exec(migration);
+await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collaborator_review_reliability.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
@@ -114,6 +115,28 @@ ok('feedback delivery unchanged', (await db.query(`select delivery->'slack'->>'s
 await as(TENG, `update members set role='admin' where user_id='${TENG}'`).catch(() => {});
 ok('role unchanged', (await db.query(`select role from members where user_id='${TENG}'`)).rows[0].role === 'creator');
 await allowed('admin grants a role', SHANE, `insert into role_grants values ('contractor@example.com','viewer')`);
+
+// ---------- rollout regressions ----------
+await denied('pending media cannot be approved', SHANE, `insert into reviews(version_id,status) values ('ast_t_v4','approved')`);
+await allowed('pending media may receive a change request', SHANE, `insert into reviews(version_id,status) values ('ast_t_v4','changes')`);
+await denied('change request cannot become approval while media is pending', SHANE, `update reviews set status='approved' where version_id='ast_t_v4'`);
+ok('rejected approval preserves review state', (await db.query(`select status from reviews where version_id='ast_t_v4'`)).rows[0].status === 'changes');
+await as(TENG, `insert into versions(id,asset_id,version,file_path,qa) values ('x','ast_t',0,'a/failed.png','[{"status":"fail"}]')`);
+await denied('failed checks block approval in the database', SHANE, `insert into reviews(version_id,status) values ('ast_t_v5','approved')`);
+await as(TENG, `insert into versions(id,asset_id,version,file_path) values ('x','ast_t',0,'')`);
+await denied('empty file path cannot be approved', SHANE, `insert into reviews(version_id,status) values ('ast_t_v6','approved')`);
+await as(TENG, `insert into versions(id,asset_id,version,file_path,render) values ('x','ast_t',0,'a/rendering.mp4','{"state":"rendering"}')`);
+await denied('a render still in progress cannot be approved', SHANE, `insert into reviews(version_id,status) values ('ast_t_v7','approved')`);
+await as(TENG, `insert into versions(id,asset_id,version,file_path) values ('x','ast_t',0,'a/ready.png')`);
+await allowed('ready media can be approved', SHANE, `insert into reviews(version_id,status) values ('ast_t_v8','approved')`);
+const request = (await rows(TENG, `insert into chat_messages(chat_id,role,body) values ('11111111-1111-1111-1111-111111111111','user','Retry me') returning id`))[0].id;
+await db.exec(`insert into chat_messages(chat_id,role,body,reply_to) values ('11111111-1111-1111-1111-111111111111','assistant','Saved response','${request}')`);
+try { await db.exec(`insert into chat_messages(chat_id,role,body,reply_to) values ('11111111-1111-1111-1111-111111111111','assistant','Duplicate','${request}')`); ok('duplicate replies prevented', false); }
+catch { ok('duplicate replies prevented', true); }
+await denied('a user cannot claim a reply slot', TENG, `insert into chat_messages(chat_id,role,body,reply_to) values ('11111111-1111-1111-1111-111111111111','user','fake','${request}')`);
+await db.exec(`insert into chats(id,title) values ('22222222-2222-2222-2222-222222222222','Other chat')`);
+try { await db.exec(`insert into chat_messages(chat_id,role,body,reply_to) values ('22222222-2222-2222-2222-222222222222','assistant','Wrong chat','${request}')`); ok('cross-chat replies prevented', false); }
+catch { ok('cross-chat replies prevented', true); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -51,3 +51,13 @@ npm run build
 ```
 
 Schema changes go in a new file in `supabase/migrations/` and are applied to the Supabase project.
+
+## Review and conversation reliability
+
+Review links include `?v=<version-id>`. An open review stays on its selected version when a teammate uploads another one. Choosing a different version clears unfinished review/comment text. Approval requires a ready media file and no failed checks, enforced by the database as well as the screen.
+
+Conversations stop accepting new messages at 60 stored messages and offer **Start a new chat**. The new chat keeps the linked Library asset, whose latest design and open feedback remain available; the old conversation is retained. Failed requests offer a retry using the same message ID. Saved assistant replies are returned again when a response was lost in transit.
+
+Private media access renews automatically in open tabs and when returning to a tab. Renewal preserves the video playhead and playback intent.
+
+Apply `20261029154845_collaborator_review_reliability.sql` before deploying this update. It adds reply deduplication and approval readiness checks without changing member roles or the manual app-feedback review process. `npm test` covers permissions, review version selection, recovery, conversation rollover, and media renewal. Claude generation and Higgsfield still require their separately configured connections.

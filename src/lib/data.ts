@@ -22,16 +22,32 @@ export const isVideo = (v?: Version | null) => !!v && (v.content_type || '').sta
 // ---- signed media URLs (private bucket) ----
 const urlCache = new Map<string, { url: string; exp: number }>();
 export async function signed(paths: (string | null | undefined)[]): Promise<Record<string, string>> {
-  const now = Date.now(); const want = [...new Set(paths.filter(Boolean) as string[])].filter(p => !(urlCache.get(p)?.exp! > now + 60_000));
+  const now = Date.now(); const want = [...new Set(paths.filter(Boolean) as string[])].filter(p => !(urlCache.get(p)?.exp! > now + 300_000));
   if (want.length) {
     const { data } = await sb().storage.from('ad-assets').createSignedUrls(want, 3600);
     (data || []).forEach(d => { if (d.path && d.signedUrl) urlCache.set(d.path, { url: d.signedUrl, exp: now + 3600_000 }); });
   }
-  const out: Record<string, string> = {}; paths.forEach(p => { if (p && urlCache.get(p)) out[p] = urlCache.get(p)!.url; }); return out;
+  const out: Record<string, string> = {}; paths.forEach(p => { const cached = p ? urlCache.get(p) : null; if (p && cached && cached.exp > Date.now()) out[p] = cached.url; }); return out;
 }
 export function useSigned(paths: (string | null | undefined)[]) {
-  const key = paths.filter(Boolean).join('|'); const [urls, setUrls] = useState<Record<string, string>>({});
-  useEffect(() => { let live = true; signed(paths).then(u => live && setUrls(u)); return () => { live = false; }; }, [key]); // eslint-disable-line
+  const key = JSON.stringify([...new Set(paths.filter(Boolean))]); const [urls, setUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let live = true, refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try { const next = await signed(JSON.parse(key)); if (live) setUrls(next); }
+      catch { /* Keep the last working URLs and retry on the next tick or focus. */ }
+      finally { refreshing = false; }
+    };
+    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    void refresh();
+    const timer = setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', visible);
+    return () => { live = false; clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('online', refresh); document.removeEventListener('visibilitychange', visible); };
+  }, [key]);
   return urls;
 }
 

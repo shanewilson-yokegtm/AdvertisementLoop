@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentMember, serviceClient } from '@/lib/supabase/server';
+import { assetVersionPath } from '@/lib/creative-loop';
 
 // Posts a review request to a Slack channel through the Yoke Slack app (SLACK_BOT_TOKEN).
 // The bot only posts where it has been invited. Without a token this returns 503 and the UI offers Copy message.
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
   if (!v) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const a: any = (v as any).assets;
   const base = typeof origin === 'string' && /^https:\/\/[\w.-]+$/.test(origin) ? origin : '';
-  const text = `*${a.concept_name}* · v${v.version} -- for review, shared by ${m.display_name}` + (note ? `\n> ${String(note).slice(0, 1000).replace(/\n/g, '\n> ')}` : '') + (base ? `\n${base}/a/${assetId}` : '');
+  const text = `*${a.concept_name}* · v${v.version} -- for review, shared by ${m.display_name}` + (note ? `\n> ${String(note).slice(0, 1000).replace(/\n/g, '\n> ')}` : '') + (base ? `\n${base}${assetVersionPath(assetId, versionId)}` : '');
   const r = await fetch('https://slack.com/api/chat.postMessage', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ channel: channel.replace(/^#/, ''), text }) });
   const j = await r.json();
   if (!j.ok) return NextResponse.json({ error: j.error === 'not_in_channel' || j.error === 'channel_not_found' ? `The Yoke Slack app isn't in ${channel}. Invite it there first.` : `Slack: ${j.error}` }, { status: 502 });
