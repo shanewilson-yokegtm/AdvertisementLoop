@@ -32,7 +32,7 @@ await db.exec(readFileSync(path.join(here, '../migrations/20261029154845_collabo
 await db.exec(readFileSync(path.join(here, '../migrations/20261029191333_voice_comments.sql'), 'utf8'));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029192856_revision_jobs.sql'), 'utf8').replace(/^alter publication.*$/m, ''));
 await db.exec(readFileSync(path.join(here, '../migrations/20261029194145_reject_cancels_revisions.sql'), 'utf8'));
-await db.exec(readFileSync(path.join(here, '../migrations/20261029210000_ownership_processing.sql'), 'utf8'));
+await db.exec(readFileSync(path.join(here, '../migrations/20261029211304_ownership_processing.sql'), 'utf8'));
 ok('migration applies', true);
 
 const SHANE = '00000000-0000-0000-0000-00000000000a', TENG = '00000000-0000-0000-0000-00000000000c',
