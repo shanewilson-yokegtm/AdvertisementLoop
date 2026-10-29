@@ -559,74 +559,56 @@ SPOTS.output = {
   draw(ctx, L, R, t) {
     const k = R.k, cx = L.W / 2, tall = L.H > 1500;
     const fl = L.H - L.ground;
-    const pc = { x: cx + 40 * k, y: L.ground + fl * (tall ? 0.36 : 0.42) };
     // 1) play button on the floor; cursor glides in, clicks at 1.4s, button squishes and shrinks away
     const CLICK = 1.4;
     const bx = cx, by = L.ground + fl * (tall ? 0.3 : 0.4), br = (tall ? 140 : 98) * k;
     const press = clamp((t - CLICK) / 0.12) * (1 - clamp((t - CLICK - 0.15) / 0.12));
     const gone = smooth((t - CLICK - 0.2) / 0.35);
-    // 2) unravel: each band peels from its right foot, outer band first
-    const U0 = 2.0, STAG = 0.4, DUR = 2.1;
-    const u = R.bands.map((b, i) => smooth((t - U0 - i * STAG) / DUR));
-    const heap = R.bands.map((b, i) => {
-      // tangled scribble: two incommensurate loops per axis, so strands cross over each other and stack up
-      const Rn = rng(300 + i * 17), M = 190, pts = [], sc = k * (tall ? 1 : 0.8);
-      const p = [Rn() * 6.28, Rn() * 6.28, Rn() * 6.28, Rn() * 6.28];
-      const fa = 2.2 + i * 0.37 + Rn() * 0.4, fb = 5.3 + Rn(), fc = 3.1 + i * 0.29 + Rn() * 0.4, fd = 7.7 + Rn();
-      const ox = (i - 2) * 34 * sc + (Rn() - 0.5) * 30 * sc, oy = (Rn() - 0.5) * 24 * sc;
-      for (let j = 0; j <= M; j++) {
-        const v = j / M, T = v * Math.PI * 2;
-        const grow = 0.55 + 0.45 * v;
-        pts.push({
-          x: pc.x + ox + (165 * Math.sin(fa * T + p[0]) + 70 * Math.sin(fb * T + p[1])) * sc * grow,
-          y: pc.y + oy + (48 * Math.cos(fc * T + p[2]) + 28 * Math.sin(fd * T + p[3])) * sc * grow - (20 + 70 * v * (0.6 + 0.4 * Math.sin(fb * T))) * sc,
-          w: b.w * 0.92,
-        });
-      }
-      return pts;
+    // 2) a clay hand comes down and kneads the rainbow, press by press, into a failed lump (v4)
+    const pr = outputPress(t, cx, k);
+    const m = pr.m; // 0 = rainbow, 1 = hodgepodge
+    const Wm = (tall ? 250 : 230) * k, Hm = (tall ? 175 : 150) * k;
+    const shapes = R.bands.map((b, i) => {
+      const Rn = rng(500 + i * 31), N = b.pts.length;
+      const ph = [Rn() * 6.28, Rn() * 6.28, Rn() * 6.28, Rn() * 6.28];
+      const fa = 1.6 + i * 0.41 + Rn() * 0.5, fb = 4.3 + Rn() * 1.5, fc = 3.7 + i * 0.33 + Rn(), fd = 7.1 + Rn();
+      const delay = Rn() * 0.25;
+      return b.pts.map((p, j) => {
+        const v = j / (N - 1), T = v * Math.PI * 2;
+        // each colour gets its own patch of the lump, so all five stay visible, mashed side by side
+        const ox = [-0.45, 0.35, -0.05, 0.5, -0.3][i], sw = 0.55;
+        const u = clamp(ox + sw * (0.72 * Math.sin(fa * T + ph[0]) + 0.28 * Math.sin(fb * T + ph[1])), -1, 1);
+        const env = Math.pow(1 - u * u, 0.6);
+        const tw = b.w * (0.95 + 0.6 * (0.5 + 0.5 * Math.sin(fd * T + ph[3])));
+        const tgt = { x: u * Wm, y: -tw * 0.42 - Hm * env * (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(fc * T + ph[2]))), w: tw };
+        const mj = smooth((m * 1.3 - delay - 0.05 * Math.sin(T * 3 + i)) / 1.0);
+        let x = lerp(p.x, tgt.x, mj), y = lerp(p.y, tgt.y, mj), w = lerp(b.w, tgt.w, mj);
+        // squash under the hand: push down and out around the contact point
+        if (pr.down > 0) {
+          const dx = cx + x - pr.x, f = Math.exp(-(dx * dx) / (2 * Math.pow(150 * k, 2))) * pr.down;
+          y = y * (1 - 0.45 * f); x += Math.sign(dx || 1) * 40 * k * f; w *= 1 + 0.35 * f;
+        }
+        return { x: cx + x, y: L.ground + Math.min(y, b.w * 0.6), w };
+      });
     });
-    const standing = Math.max(...u.map(x => 1 - x));
-    if (standing > 0.01) contactShadow(ctx, cx, L.ground, R.top + R.w * 0.5, standing);
-    const heapAmt = Math.max(...u);
-    if (heapAmt > 0.01) { ctx.save(); ctx.filter = 'blur(20px)'; ctx.fillStyle = `rgba(70,45,20,${0.26 * heapAmt})`; ctx.beginPath(); ctx.ellipse(pc.x + 16, pc.y + 30 * k, 250 * k * heapAmt, 70 * k * heapAmt, 0, 0, 7); ctx.fill(); ctx.restore(); }
-    // standing arcs (clipped at the floor so the feet read as pressed in)
-    const cuts = [];
+    let minX = 1e9, maxX = -1e9; shapes.forEach(ps => ps.forEach(p => { minX = Math.min(minX, p.x - p.w / 2); maxX = Math.max(maxX, p.x + p.w / 2); }));
+    contactShadow(ctx, (minX + maxX) / 2, L.ground, (maxX - minX) / 2);
     ctx.save(); ctx.beginPath(); ctx.rect(0, 0, L.W, L.ground + 3); ctx.clip();
-    R.bands.forEach((b, i) => {
-      const sEnd = 1 - u[i];
-      let ps = b.pts.filter((p, pi) => pi > 0 && pi < b.pts.length - 1 && p.s <= sEnd + 1e-9);
-      ps = [b.pts[0], ...ps];
-      if (u[i] === 0) ps.push(b.pts[b.pts.length - 1]);
-      const scr = ps.map(p => ({ x: cx + p.x, y: L.ground + p.y, w: b.w }));
-      if (scr.length >= 2 && u[i] < 0.999) drawTube(ctx, L.W, L.H, scr, b.color, 11 + i * 7);
-      cuts.push(scr[scr.length - 1]);
-    });
+    // late in the morph, draw bands in a shuffled order so colours sit on top of each other like mashed clay
+    if (m < 0.35) shapes.forEach((ps, i) => drawTube(ctx, L.W, L.H, ps, R.bands[i].color, 11 + i * 7));
+    else { // chop each band into pieces and interleave them, so colours fold over each other like mashed clay
+      const pieces = []; shapes.forEach((ps, i) => { const n = ps.length, q = 4; for (let c = 0; c < q; c++) pieces.push({ i, c, ps: ps.slice(Math.floor(c * (n - 1) / q), Math.floor((c + 1) * (n - 1) / q) + 2) }); });
+      const Rs = rng(907); pieces.map(p => ({ p, r: Rs() })).sort((a, b) => a.r - b.r).forEach(({ p }) => drawTube(ctx, L.W, L.H, p.ps, R.bands[p.i].color, 11 + p.i * 7 + p.c));
+    }
     ctx.restore();
     playButton(ctx, bx, by, br * (1 - 0.6 * gone), press, 1 - gone);
-    // peeled strands: droop from the cut point; the pile starts as a small blob right under the cut and spreads
-    // into the tangled heap as more clay comes off (no long line across the frame at the start)
-    R.bands.forEach((b, i) => {
-      if (u[i] <= 0) return;
-      const P = cuts[i], hp = heap[i];
-      const n = Math.max(2, Math.floor(u[i] * (hp.length - 1)));
-      const g = smooth(u[i] / 0.35);
-      const drop = { x: P.x + 30 * k, y: Math.max(P.y + 40 * k, L.ground + 20 * k) };
-      const pile = hp.slice(0, n + 1).map(q => ({ x: lerp(drop.x, q.x, g) + (q.x - pc.x) * 0.25 * (1 - g), y: lerp(drop.y, q.y, g) + (q.y - pc.y) * 0.25 * (1 - g), w: q.w }));
-      const Q = pile[pile.length - 1];
-      const ctrl = { x: lerp(P.x, Q.x, 0.5) + 30 * k, y: Math.max(P.y, Q.y) + 30 * k };
-      const bridge = [];
-      const fade = u[i] > 0.97 ? 1 - (u[i] - 0.97) / 0.03 : 1;
-      for (let q = 0; q <= 18; q++) { const s = q / 18; const a = (1 - s) * (1 - s), bb = 2 * (1 - s) * s, c = s * s; bridge.push({ x: a * P.x + bb * ctrl.x + c * Q.x, y: a * P.y + bb * ctrl.y + c * Q.y, w: b.w * 0.92 }); }
-      const path = fade < 1 ? pile : [...pile, ...bridge.reverse()];
-      drawTube(ctx, L.W, L.H, path, b.color, 200 + i);
-    });
-    // 3) "Done": pops in big over the messy pile, with a burst, and holds
-    const DONE = U0 + 4 * STAG + DUR + 0.15;
+    if (pr.vis > 0) clayHand(ctx, L, pr.x, L.ground - pr.contact(shapes, L.ground) + 6 * k - pr.lift, k * (tall ? 1.1 : 1));
+    // 3) "Done": pops in big over the lump, with a burst, and holds
+    const DONE = OUT_DONE;
     if (t > DONE) {
       const d = t - DONE;
       const grow = d < 0.28 ? ease(d / 0.28) * 1.18 : 1 + Math.exp(-(d - 0.28) * 7) * Math.cos((d - 0.28) * 20) * 0.18;
-      const dx = pc.x, dy = pc.y - (tall ? 330 : 250) * k;
-      // burst rays
+      const dx = cx, dy = L.ground - Hm - (tall ? 300 : 230) * k;
       if (d < 0.9) {
         ctx.save(); ctx.translate(dx, dy); ctx.strokeStyle = C.ink; ctx.lineCap = 'round'; ctx.lineWidth = 9 * k; ctx.globalAlpha = 1 - clamp((d - 0.4) / 0.5);
         for (let r = 0; r < 12; r++) { const a = r / 12 * Math.PI * 2 + 0.13, r0 = (230 + 260 * ease(d / 0.6)) * k, r1 = r0 + 70 * k * (1 - clamp(d / 0.9));
@@ -644,6 +626,39 @@ SPOTS.output = {
     if (cur) drawCursor(ctx, cur.x, cur.y, k * (tall ? 1.15 : 1), press);
   },
 };
+
+// v4 (jobs ba1bc4ab / d4880127): the unravel read as unclear, so a clay hand now kneads the rainbow, press by press,
+// into an unrecognisable lump. Hand enters ~1.9s, five presses 2.4-5.6s, leaves by 6.3s, "Done" at 6.5s.
+const OUT_PRESSES = [2.45, 3.1, 3.75, 4.4, 5.1];
+const OUT_DONE = 6.5;
+function outputPress(t, cx, k) {
+  const xs = [40, -130, 140, -40, 70].map(v => cx + v * k);
+  const PD = 0.5; // each press: down 0.18s, hold, up
+  let m = 0, down = 0, x = xs[0];
+  OUT_PRESSES.forEach((p, i) => {
+    m += 0.2 * smooth((t - p - 0.05) / 0.3);
+    const ph = (t - p) / PD; if (ph > 0 && ph < 1) down = Math.max(down, ph < 0.35 ? smooth(ph / 0.35) : 1 - smooth((ph - 0.35) / 0.65));
+  });
+  // hand x glides between press spots while lifted
+  for (let i = 0; i < OUT_PRESSES.length; i++) { const a = OUT_PRESSES[i], b = OUT_PRESSES[i + 1]; if (t >= a) x = b && t > a + PD * 0.6 ? lerp(xs[i], xs[i + 1], smooth((t - a - PD * 0.6) / (b - a - PD * 0.6))) : xs[i]; }
+  const enter = smooth((t - 1.9) / 0.5), leave = smooth((t - 5.75) / 0.55);
+  const lift = (1 - down) * 150 * k + (1 - enter) * 250 * k + leave * 250 * k;
+  return { m: clamp(m), down, x: x + (1 - enter) * 900 * k + leave * 1000 * k, lift, vis: t > 1.85 && t < 6.4 ? 1 : 0,
+    contact(shapes, ground) { // height of the clay top under the hand, above the floor
+      let top = 0; shapes.forEach(ps => ps.forEach(p => { if (Math.abs(p.x - this.x) < 90 * k) top = Math.max(top, ground - (p.y - p.w / 2)); })); return top; } };
+}
+// Clay hand pressing down, palm toward the floor, fingertips at (x, y). Arm comes in from the top right.
+function clayHand(ctx, L, x, y, k) {
+  const skin = '#E9B48F', sleeve = '#3B3F48';
+  const P = (dx, dy) => ({ x: x + dx * k, y: y + dy * k });
+  const tube = (pts, w, col, seed) => drawTube(ctx, L.W, L.H, pts.map(([a, b]) => ({ ...P(a, b), w: w * k })), col, seed);
+  tube([[190, -250], [420, -330], [700, -420], [1000, -510]], 150, sleeve, 71);
+  tube([[70, -150], [130, -215], [200, -255]], 120, skin, 72); // wrist
+  tube([[-40, -90], [20, -110], [80, -150]], 175, skin, 73); // palm
+  [[-120, -60, -150, -10], [-80, -55, -95, -2], [-35, -55, -40, 0], [10, -60, 15, -8]].forEach(([a, b, c, d], i) =>
+    tube([[a + 20, b - 40], [a, b], [c, d]], 52 - i * 2, skin, 80 + i)); // fingers, tips on the clay
+  tube([[95, -150], [125, -95], [120, -45]], 56, skin, 90); // thumb
+}
 
 function drawFrame(canvas, spotKey, ratio, t, logoImg) {
   const L = LAYOUT[ratio]; canvas.width = L.W; canvas.height = L.H;
