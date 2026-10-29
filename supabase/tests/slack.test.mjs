@@ -122,5 +122,13 @@ ok('removing a reaction is kept as history', o === 'reaction_removed' && (await 
 ok('Slack feedback never creates a version or starts processing', (await db.query(`select count(*)::int n from versions where asset_id='ast_t'`)).rows[0].n === 2
   && (await db.query(`select count(*)::int n from processing`)).rows[0].n === 0 && (await db.query(`select count(*)::int n from revision_jobs`)).rows[0].n === 0);
 
+// transport: arguments must reach Slack on read methods (form-encoded), including private channel types and blocks
+{ const seen = []; const fakeFetch = async (url, init) => { seen.push({ url, type: init.headers['content-type'], body: String(init.body) }); return { json: async () => ({ ok: true }) }; };
+  const call = mod.slackApi('xoxb-test', fakeFetch);
+  await call('users.conversations', { types: 'public_channel,private_channel', exclude_archived: true, limit: 200 });
+  await call('chat.postMessage', { channel: 'C1', blocks: [{ type: 'section' }] });
+  ok('read methods send form-encoded args (private channels included)', seen[0].type === 'application/x-www-form-urlencoded' && new URLSearchParams(seen[0].body).get('types') === 'public_channel,private_channel');
+  ok('blocks are sent as JSON text inside the form', JSON.parse(new URLSearchParams(seen[1].body).get('blocks'))[0].type === 'section'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

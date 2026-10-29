@@ -7,8 +7,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type SlackApi = (method: string, args: Record<string, any>) => Promise<any>;
 export function slackApi(token: string, fetcher: typeof fetch = fetch): SlackApi {
+  // Form-encoded for every method: Slack ignores JSON bodies on read methods (users.conversations, users.info,
+  // chat.getPermalink, users.lookupByEmail), which silently drops arguments such as types=private_channel.
   return async (method, args) => {
-    const r = await fetcher(`https://slack.com/api/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify(args) });
+    const body = new URLSearchParams();
+    for (const [k, v] of Object.entries(args)) if (v !== undefined && v !== null) body.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    const r = await fetcher(`https://slack.com/api/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/x-www-form-urlencoded' }, body });
     return r.json();
   };
 }
