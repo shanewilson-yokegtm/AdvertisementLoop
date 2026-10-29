@@ -153,7 +153,7 @@ function AssetDetail({ id }: { id: string }) {
 }
 
 const JOB_TEXT: Record<string, string> = {
-  queued: 'Queued · Claude starts within 15 minutes', working: 'Claude is making the next version',
+  queued: 'Queued · Claude starts within the hour', working: 'Claude is making the next version',
   done: 'Next version ready', needs_input: 'Claude needs your input', failed: 'Revision failed',
 };
 function JobStatus({ job, vs, onOpen }: { job: any; vs: Version[]; onOpen: (id: string) => void }) {
