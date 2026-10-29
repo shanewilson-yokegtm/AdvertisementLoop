@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
 import { useRows, useSigned, useMembers, can, fmtDate, fmtSec, fmtBytes, isVideo, FORMATS, KIND_LABEL, type Asset, type Version, type Review, type Comment } from '@/lib/data';
 import { Player } from '@/components/Media';
@@ -9,9 +9,15 @@ import { statusChip, renderChip } from '@/components/Chips';
 import { useApp } from '@/components/Shell';
 import Upload from '@/components/Upload';
 import Share from '@/components/Share';
+import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
 
 export default function AssetPage() {
-  const { id } = useParams<{ id: string }>(); const router = useRouter();
+  const { id } = useParams<{ id: string }>();
+  return <Suspense fallback={<div className="empty">Loading</div>}><AssetDetail key={id} id={id} /></Suspense>;
+}
+
+function AssetDetail({ id }: { id: string }) {
+  const router = useRouter(); const params = useSearchParams();
   const { member, toast } = useApp(); const who = useMembers();
   const assets = useRows<Asset>('assets', { filter: ['id', id] });
   const versions = useRows<Version>('versions', { filter: ['asset_id', id], order: 'version', asc: true });
@@ -20,15 +26,25 @@ export default function AssetPage() {
   const shares = useRows<any>('shares', { filter: ['asset_id', id], order: 'at' });
   const [sel, setSel] = useState<string | null>(null); const [up, setUp] = useState(false); const [share, setShare] = useState(false);
   const [note, setNote] = useState(''); const [cmt, setCmt] = useState(''); const [atHead, setAtHead] = useState(false);
-  const a = assets.rows[0]; const vs = versions.rows; const v = vs.find(x => x.id === sel) || vs[vs.length - 1];
+  const a = assets.rows[0]; const vs = versions.rows; const latest = vs[vs.length - 1];
+  const requested = params.get('v'); const selectedId = requested ?? sel;
+  useEffect(() => { setNote(''); setCmt(''); setAtHead(false); setShare(false); }, [selectedId]);
+  // Freeze the initial selection. Realtime updates must never change the version being reviewed.
+  useEffect(() => { if (versions.ready && latest && !sel) setSel(latest.id); }, [versions.ready, latest?.id, sel]);
+  const v = vs.find(x => x.id === selectedId);
   const urls = useSigned(v ? [v.file_path, v.poster_path] : []);
-  if (!assets.ready || !versions.ready) return <div className="empty"><span className="muted">Loading</span></div>;
-  if (!a || !v) return <div className="empty"><h2>Not found</h2><Link className="btn" href="/">Back to Library</Link></div>;
-  const rev = reviews.rows.find(r => r.version_id === v.id); const isLatest = v === vs[vs.length - 1];
-  const failQA = (v.qa || []).some((q: any) => q.status === 'fail');
+  const selectVersion = (versionId: string) => {
+    setNote(''); setCmt(''); setAtHead(false); setShare(false);
+    router.replace(assetVersionPath(id, versionId), { scroll: false });
+  };
+  if (!assets.ready || !versions.ready || (latest && selectedId === null)) return <div className="empty"><span className="muted">Loading</span></div>;
+  if (!a || !v) return <div className="empty"><h2>{requested !== null ? 'Version not found' : 'Not found'}</h2><Link className="btn" href="/">Back to Library</Link></div>;
+  const rev = reviews.rows.find(r => r.version_id === v.id); const isLatest = v.id === latest?.id;
+  const blockedApproval = approvalBlock(v);
   const src = v.source || {};
 
   const review = async (status: 'approved' | 'changes') => {
+    if (status === 'approved' && blockedApproval) { toast(blockedApproval); return; }
     const { error } = await sb().from('reviews').upsert({ version_id: v.id, status, note: note.trim() || null }, { onConflict: 'version_id' });
     if (error) { toast('Not saved · ' + error.message); return; }
     if (status === 'changes' && note.trim()) await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: note.trim() });
@@ -54,7 +70,8 @@ export default function AssetPage() {
     </div>
     <div className="asset">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {vs.length > 1 ? <div className="vtabs" role="group" aria-label="Versions">{vs.map(x => <button key={x.id} aria-pressed={x.id === v.id} onClick={() => setSel(x.id)}>v{x.version}</button>)}</div> : null}
+        {!isLatest && latest ? <div className="banner" role="status">You are viewing v{v.version}. A newer version is available. <button className="btn small" onClick={() => selectVersion(latest.id)}>View v{latest.version}</button></div> : null}
+        {vs.length > 1 ? <div className="vtabs" role="group" aria-label="Versions">{vs.map(x => <button key={x.id} aria-pressed={x.id === v.id} onClick={() => selectVersion(x.id)}>v{x.version}</button>)}</div> : null}
         <div className="preview"><Player v={v} urls={urls} /></div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -69,9 +86,10 @@ export default function AssetPage() {
           {v.file_path ? <button className="btn" onClick={download}>Download</button> : null}
           {src.link ? <a className="btn" href={src.link} target="_blank" rel="noopener">Editable source</a> : null}
         </div>
-        {can(member, 'approver') ? <div className="panel"><div className="row" style={{ justifyContent: 'space-between' }}><h3>Review</h3>{failQA ? <span className="chip warn">Fix failed checks</span> : null}</div>
+        {can(member, 'approver') ? <div className="panel"><div className="row" style={{ justifyContent: 'space-between' }}><h3>Review v{v.version}</h3></div>
+          {blockedApproval ? <p className="muted" role="status">{blockedApproval}</p> : null}
           <textarea rows={2} placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} />
-          <div className="row"><button className="btn primary" disabled={failQA || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button>
+          <div className="row"><button className="btn primary" disabled={!!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button>
             <button className="btn" disabled={rev?.status === 'changes' && !note.trim()} onClick={() => review('changes')}>Request changes</button></div></div> : null}
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>Feedback</h2>
