@@ -13,7 +13,6 @@ type CType = 'static' | 'motion' | 'higgsfield';
 const TYPES: [CType, string][] = [['static', 'Static'], ['motion', 'Infographic video'], ['higgsfield', 'Higgsfield video']];
 const HIGGSFIELD_CONNECTED = false;
 const HF_REQ = "Higgsfield isn't connected. A claude.ai Owner must add the Higgsfield connector (mcp.higgsfield.ai/mcp) on Yoke's existing Higgsfield account, and Shane must approve a budget. Until then your idea is saved as a pending Library item; no video is made.";
-const CLAUDE_OFF = "Claude replies aren't switched on in the hosted studio yet: they need an Anthropic API key (billed separately) that Shane hasn't approved. Your message is saved for the team.";
 
 function TypeBar({ value, onChange }: { value: CType; onChange: (t: CType) => void }) {
   return <div className="typebar" role="radiogroup" aria-label="What to make">
@@ -23,13 +22,22 @@ function TypeBar({ value, onChange }: { value: CType; onChange: (t: CType) => vo
   </div>;
 }
 const TypeNote = ({ t }: { t: CType }) => (t === 'higgsfield' && !HIGGSFIELD_CONNECTED ? <div className="banner">{HF_REQ}</div> : null);
+// Claude replies are on only when the server has an API key (checked via /api/health).
+function useClaudeOn() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => { fetch('/api/health').then(r => r.json()).then(j => setOn(!!j?.configured?.claude)).catch(() => setOn(false)); }, []);
+  return on;
+}
+const ClaudeOff = ({ on }: { on: boolean | null }) => (on === false ? <div className="banner" role="status"><span><b>Claude: off</b> · replies switch on once an Anthropic API key is added. Messages and type choices are still saved.</span></div> : null);
 
 export function CreateHome() {
   const { member, toast } = useApp(); const router = useRouter(); const who = useMembers();
   const chats = useRows<any>('chats', { order: 'updated_at' });
   const [t, setT] = useState<CType>('static'); const [text, setText] = useState(''); const [busy, setBusy] = useState(false);
+  const claudeOn = useClaudeOn();
   return <>
-    <div className="head"><h1>Create an ad</h1></div>
+    <div className="head"><h1>Create an ad</h1>{claudeOn === false ? <span className="chip">Claude: off</span> : claudeOn ? <span className="chip live">Claude: on</span> : null}</div>
+    <div style={{ marginBottom: 12 }}><ClaudeOff on={claudeOn} /></div>
     {!can(member, 'creator') ? <div className="banner" style={{ marginBottom: 12 }}>View-only access · ask Shane for Creator</div> : null}
     <form className="composer panel" onSubmit={async e => {
       e.preventDefault(); const body = text.trim(); if (!body || !can(member, 'creator')) return; setBusy(true);
@@ -59,7 +67,7 @@ export function ChatView({ id }: { id: string }) {
   const vById = Object.fromEntries(versions.rows.map(v => [v.id, v])); const aById = Object.fromEntries(assets.rows.map(a => [a.id, a]));
   const refs = msgs.rows.flatMap((m: any) => m.asset_refs || []);
   const urls = useSigned(refs.map((r: any) => { const v = vById[r.version_id]; return v ? (v.poster_path || (v.content_type?.startsWith('image/') ? v.file_path : null)) : null; }));
-  const started = useRef(false);
+  const started = useRef(false); const claudeOn = useClaudeOn();
 
   const setType = (k: CType) => { setT(k); if (can(member, 'creator')) sb().from('chats').update({ create_type: k }).eq('id', id).then(() => {}); };
 
@@ -81,7 +89,7 @@ export function ChatView({ id }: { id: string }) {
     for (let round = 0; round < 4; round++) {
       const r = await fetch('/api/claude', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chatId: id, type: ty, turn, assetRefs: made, blocked }) });
       const j = await r.json().catch(() => ({}));
-      if (r.status === 503) { setStatus(CLAUDE_OFF); break; }
+      if (r.status === 503) { setStatus('Saved · Claude is off'); break; }
       if (!r.ok) { setStatus('Claude stopped · ' + (j.error || r.status)); break; }
       if (j.stop === 'end_turn') { setStatus(''); break; }
       // tool round: run each tool here, in the browser, then hand the results back
@@ -133,7 +141,7 @@ export function ChatView({ id }: { id: string }) {
       {live ? <div className="msg ai"><div className="who">Claude</div><div className="txt">{live}</div></div> : null}
     </div>
     <form className="composer" onSubmit={e => { e.preventDefault(); const b = text.trim(); if (!b) return; setText(''); send(b, type); }}>
-      <TypeBar value={type} onChange={setType} /><TypeNote t={type} />
+      <ClaudeOff on={claudeOn} /><TypeBar value={type} onChange={setType} /><TypeNote t={type} />
       <label htmlFor="cmp" className="sr">Message</label>
       <textarea id="cmp" rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="Describe the ad, or what to change"
         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} />
