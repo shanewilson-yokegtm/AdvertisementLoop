@@ -504,26 +504,49 @@ SPOTS.repair = {
 };
 
 // ---------- Spot 5: What did it actually do? ----------
-// v2 (job e12252a0): slower, fewer things. Card goes in, the rainbow unravels band by band into a tangled heap
-// on the floor, then "Done" pops up over the mess. Hard cut at 7.0s, 10s total, typed end line, bigger lockup.
+// v2 (job e12252a0): slower, fewer things. The rainbow unravels band by band into a tangled heap, then "Done" pops.
+// v3 (job f593da1e): headline is just "Go-to-market engineering" in big ink type (no question line). A cursor clicks a
+// play button on the floor and that starts the unravel. Each strand now droops gently from its cut point instead of
+// shooting across the frame. "Done" pops big over the messy pile and holds ~2.7s. Cut at 8.5s, 11.5s total.
+function playButton(ctx, x, y, r, press, alpha) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y); ctx.scale(1 + press * 0.08, 1 - press * 0.12);
+  ctx.save(); ctx.filter = 'blur(12px)'; ctx.fillStyle = 'rgba(50,30,10,0.25)'; ctx.beginPath(); ctx.ellipse(8, r * 0.75, r * 1.05, r * 0.35, 0, 0, 7); ctx.fill(); ctx.restore();
+  const g = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r * 1.05);
+  g.addColorStop(0, shade(C.coral, 0.3)); g.addColorStop(0.55, C.coral); g.addColorStop(1, shade(C.coral, -0.25));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+  ctx.lineWidth = Math.max(3, r * 0.05); ctx.strokeStyle = C.ink; ctx.stroke();
+  ctx.fillStyle = C.paper; ctx.beginPath(); ctx.moveTo(-r * 0.28, -r * 0.42); ctx.lineTo(r * 0.48, 0); ctx.lineTo(-r * 0.28, r * 0.42); ctx.closePath();
+  ctx.lineJoin = 'round'; ctx.lineWidth = r * 0.12; ctx.strokeStyle = C.paper; ctx.stroke(); ctx.fill();
+  ctx.restore();
+}
 SPOTS.output = {
-  headline: 'What did it actually do?', kicker: KICK, kickerScale: 0.95, cut: 7.0, total: 10.0,
+  headline: 'Go-to-market engineering', kicker: null, cut: 8.5, total: 11.5,
   endCard: { logoScale: 0.72, type: { start: 0.35, dur: 1.7 }, buttonAt: 2.25 },
+  drawHead(ctx, L) { // two big ink lines, top of frame
+    ctx.save(); ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    const tall = L.H > 1500; let size = L.W * (tall ? 0.15 : 0.125);
+    ctx.font = `700 ${size}px ${FONT}`;
+    const fit = (L.W - 110) / ctx.measureText('Go-to-market').width; if (fit < 1) { size *= fit; ctx.font = `700 ${size}px ${FONT}`; }
+    const y2 = tall ? L.headY + 90 : L.headY + 10, y1 = y2 - size * 1.02;
+    ctx.fillText('Go-to-market', L.W / 2, y1); ctx.fillText('engineering', L.W / 2, y2);
+    ctx.restore();
+  },
   draw(ctx, L, R, t) {
-    const k = R.k, cx = L.W / 2;
-    // 1) account card slides in along the floor (0.3-1.9s), then is swallowed into the opening (1.9-2.4s)
-    const slide = ease(clamp((t - 0.3) / 1.6));
-    const swallow = smooth((t - 1.9) / 0.5);
-    const cw = 250 * k, ch = 150 * k;
-    // 2) unravel: each band peels from its right foot, outer band first
-    const U0 = 2.6, STAG = 0.45, DUR = 2.2;
-    const u = R.bands.map((b, i) => smooth((t - U0 - i * STAG) / DUR));
-    // the heap sits on the floor in front of the arch
+    const k = R.k, cx = L.W / 2, tall = L.H > 1500;
     const fl = L.H - L.ground;
-    const pc = { x: cx + 40 * k, y: L.ground + fl * (L.H > 1500 ? 0.36 : 0.42) };
+    const pc = { x: cx + 40 * k, y: L.ground + fl * (tall ? 0.36 : 0.42) };
+    // 1) play button on the floor; cursor glides in, clicks at 1.4s, button squishes and shrinks away
+    const CLICK = 1.4;
+    const bx = cx, by = L.ground + fl * (tall ? 0.3 : 0.4), br = (tall ? 140 : 98) * k;
+    const press = clamp((t - CLICK) / 0.12) * (1 - clamp((t - CLICK - 0.15) / 0.12));
+    const gone = smooth((t - CLICK - 0.2) / 0.35);
+    // 2) unravel: each band peels from its right foot, outer band first
+    const U0 = 2.0, STAG = 0.4, DUR = 2.1;
+    const u = R.bands.map((b, i) => smooth((t - U0 - i * STAG) / DUR));
     const heap = R.bands.map((b, i) => {
       // tangled scribble: two incommensurate loops per axis, so strands cross over each other and stack up
-      const Rn = rng(300 + i * 17), M = 190, pts = [], sc = k * (L.H > 1500 ? 1 : 0.8);
+      const Rn = rng(300 + i * 17), M = 190, pts = [], sc = k * (tall ? 1 : 0.8);
       const p = [Rn() * 6.28, Rn() * 6.28, Rn() * 6.28, Rn() * 6.28];
       const fa = 2.2 + i * 0.37 + Rn() * 0.4, fb = 5.3 + Rn(), fc = 3.1 + i * 0.29 + Rn() * 0.4, fd = 7.7 + Rn();
       const ox = (i - 2) * 34 * sc + (Rn() - 0.5) * 30 * sc, oy = (Rn() - 0.5) * 24 * sc;
@@ -538,7 +561,6 @@ SPOTS.output = {
       }
       return pts;
     });
-    // contact shadow under whatever is still standing, plus one under the heap
     const standing = Math.max(...u.map(x => 1 - x));
     if (standing > 0.01) contactShadow(ctx, cx, L.ground, R.top + R.w * 0.5, standing);
     const heapAmt = Math.max(...u);
@@ -556,32 +578,46 @@ SPOTS.output = {
       cuts.push(scr[scr.length - 1]);
     });
     ctx.restore();
-    // swallowed card is drawn over the arch until it is gone
-    if (swallow < 1) {
-      const x = lerp(-cw, cx, slide), y = L.ground - ch / 2 - 6;
-      ctx.save(); ctx.translate(x, y + swallow * ch * 0.5); ctx.scale(1 - swallow * 0.3, 1 - swallow);
-      ctx.save(); ctx.filter = 'blur(8px)'; ctx.fillStyle = 'rgba(50,30,10,0.2)'; roundRect(ctx, -cw / 2 + 6, -ch / 2 + 8, cw, ch, 16 * k); ctx.fill(); ctx.restore();
-      ctx.fillStyle = C.paper; roundRect(ctx, -cw / 2, -ch / 2, cw, ch, 16 * k); ctx.fill(); ctx.lineWidth = 3 * k; ctx.strokeStyle = C.ink; ctx.stroke();
-      for (let r = 0; r < 3; r++) { const ry = -ch / 2 + (30 + r * 34) * k; ctx.fillStyle = [C.coral, C.ink, '#6FA3C9'][r]; ctx.beginPath(); ctx.arc(-cw / 2 + 30 * k, ry, 10 * k, 0, 7); ctx.fill(); ctx.fillStyle = C.stone; roundRect(ctx, -cw / 2 + 52 * k, ry - 7 * k, (130 - r * 18) * k, 14 * k, 7 * k); ctx.fill(); }
-      ctx.restore();
-    }
-    // peeled strands: from each cut point, sag down to the floor and pile up in loops (innermost band on top)
+    playButton(ctx, bx, by, br * (1 - 0.6 * gone), press, 1 - gone);
+    // peeled strands: droop from the cut point; the pile starts as a small blob right under the cut and spreads
+    // into the tangled heap as more clay comes off (no long line across the frame at the start)
     R.bands.forEach((b, i) => {
       if (u[i] <= 0) return;
       const P = cuts[i], hp = heap[i];
       const n = Math.max(2, Math.floor(u[i] * (hp.length - 1)));
-      const Q = hp[n]; // strand enters the heap at its newest loop
-      const ctrl = { x: lerp(P.x, Q.x, 0.5) + 50 * k, y: Math.max(P.y, Q.y) + 40 * k };
+      const g = smooth(u[i] / 0.35);
+      const drop = { x: P.x + 30 * k, y: Math.max(P.y + 40 * k, L.ground + 20 * k) };
+      const pile = hp.slice(0, n + 1).map(q => ({ x: lerp(drop.x, q.x, g) + (q.x - pc.x) * 0.25 * (1 - g), y: lerp(drop.y, q.y, g) + (q.y - pc.y) * 0.25 * (1 - g), w: q.w }));
+      const Q = pile[pile.length - 1];
+      const ctrl = { x: lerp(P.x, Q.x, 0.5) + 30 * k, y: Math.max(P.y, Q.y) + 30 * k };
       const bridge = [];
-      const fade = u[i] > 0.97 ? 1 - (u[i] - 0.97) / 0.03 : 1; // bridge shortens to nothing as the band finishes
+      const fade = u[i] > 0.97 ? 1 - (u[i] - 0.97) / 0.03 : 1;
       for (let q = 0; q <= 18; q++) { const s = q / 18; const a = (1 - s) * (1 - s), bb = 2 * (1 - s) * s, c = s * s; bridge.push({ x: a * P.x + bb * ctrl.x + c * Q.x, y: a * P.y + bb * ctrl.y + c * Q.y, w: b.w * 0.92 }); }
-      const pile = hp.slice(0, n + 1);
       const path = fade < 1 ? pile : [...pile, ...bridge.reverse()];
       drawTube(ctx, L.W, L.H, path, b.color, 200 + i);
     });
-    // 3) "Done", popped over the mess
+    // 3) "Done": pops in big over the messy pile, with a burst, and holds
     const DONE = U0 + 4 * STAG + DUR + 0.15;
-    if (t > DONE) { const d = t - DONE; const pop = 1 + Math.exp(-d * 8) * Math.sin(d * 26) * 0.14; pill(ctx, pc.x, pc.y - 230 * k, 'Done', k * 1.35, '#CDF05B', C.ink, pop); }
+    if (t > DONE) {
+      const d = t - DONE;
+      const grow = d < 0.28 ? ease(d / 0.28) * 1.18 : 1 + Math.exp(-(d - 0.28) * 7) * Math.cos((d - 0.28) * 20) * 0.18;
+      const dx = pc.x, dy = pc.y - (tall ? 330 : 250) * k;
+      // burst rays
+      if (d < 0.9) {
+        ctx.save(); ctx.translate(dx, dy); ctx.strokeStyle = C.ink; ctx.lineCap = 'round'; ctx.lineWidth = 9 * k; ctx.globalAlpha = 1 - clamp((d - 0.4) / 0.5);
+        for (let r = 0; r < 12; r++) { const a = r / 12 * Math.PI * 2 + 0.13, r0 = (230 + 260 * ease(d / 0.6)) * k, r1 = r0 + 70 * k * (1 - clamp(d / 0.9));
+          ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0 * 0.7); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1 * 0.7); ctx.stroke(); }
+        ctx.restore();
+      }
+      ctx.save(); ctx.translate(dx, dy); ctx.rotate(-0.06 * Math.exp(-d * 3)); pill(ctx, 0, 0, 'Done', k * 1.35, '#CDF05B', C.ink, (tall ? 2.4 : 2.0) * grow); ctx.restore();
+    }
+    // cursor: glides in from lower right, clicks the play button, then drifts out
+    const tip = { x: bx + br * 0.25, y: by + br * 0.2 };
+    let cur = null;
+    if (t < CLICK) { const q = ease((t - 0.3) / (CLICK - 0.3)); cur = { x: lerp(L.W + 60, tip.x, q), y: lerp(L.H + 40, tip.y, q) - Math.sin(q * Math.PI) * 60 * k }; }
+    else if (t < CLICK + 0.35) cur = tip;
+    else if (t < 2.6) { const q = smooth((t - CLICK - 0.35) / 0.85); cur = { x: lerp(tip.x, L.W + 80, q), y: lerp(tip.y, L.H + 60, q) }; }
+    if (cur) drawCursor(ctx, cur.x, cur.y, k * (tall ? 1.15 : 1), press);
   },
 };
 
@@ -593,6 +629,7 @@ function drawFrame(canvas, spotKey, ratio, t, logoImg) {
   const R = rainbowRest(L);
   drawStage(ctx, L);
   sp.draw(ctx, L, R, t);
-  drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null, sp.kickerScale ?? 0.62, sp.headScale ?? 1);
+  if (sp.drawHead) sp.drawHead(ctx, L, t);
+  else drawHeadline(ctx, L, sp.headlineAt ? sp.headlineAt(t) : sp.headline, 1, sp.kicker || null, sp.kickerScale ?? 0.62, sp.headScale ?? 1);
 }
 window.drawFrame = drawFrame;
