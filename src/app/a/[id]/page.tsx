@@ -142,7 +142,7 @@ function AssetDetail({ id }: { id: string }) {
 
         <section className="section" aria-labelledby="fbH">
           <div className="sechead"><h2 id="fbH">Feedback</h2>{openCount ? <span className="muted small">{openCount} open</span> : null}</div>
-          {!comments.rows.length ? null : manage ? <p className="hint">Approve the changes you want in the next version, then Regenerate ad. This is separate from approving the ad itself.</p>
+          {!comments.rows.length ? null : manage ? <p className="hint">Approve the changes you want in the next version, then regenerate. This is separate from approving the ad itself.</p>
             : <p className="hint">{ownerName} decides which feedback goes into the next version.</p>}
           <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }}>
             {manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} /> : null}

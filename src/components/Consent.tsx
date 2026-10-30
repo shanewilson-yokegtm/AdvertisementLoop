@@ -57,4 +57,3 @@ export function Consent({ authorizationId, known = KNOWN, go = (u: string) => lo
     </div>
   </div>;
 }
-
