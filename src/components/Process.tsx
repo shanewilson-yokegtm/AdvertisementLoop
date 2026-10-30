@@ -40,7 +40,6 @@ export default function ProcessFeedback({ a, vs, comments, proc, reload, toast, 
   const viaClaude = !hfSpec && !workerCanRebuild(parent);
   const prompt = `Make the next version of “${a.concept_name.trim()}” in Ad Studio with its approved feedback (ad ${a.id}).`;
   const last = proc && ['done', 'failed'].includes(proc.status) ? proc : null;
-  const lastOut = last?.result_version_id ? vs.find(v => v.id === last.result_version_id) : null;
 
   const regenerate = async () => {
     setBusy(true);
@@ -101,10 +100,9 @@ export default function ProcessFeedback({ a, vs, comments, proc, reload, toast, 
   </section>;
 
   return <section id="process-panel" className="regen" aria-label="Next version">
-    {last ? <div className="row" role="status">
-      <span className={'chip ' + (last.status === 'done' ? 'ok' : 'err')}>{last.status === 'done' ? `v${lastOut?.version ?? ''} ready` : 'Last regenerate failed'}</span>
-      {lastOut ? <button className="btn small ghost" onClick={() => onOpen(lastOut.id)}>View v{lastOut.version}</button> : null}
-      {last.status === 'failed' && last.message ? <span className="muted small" style={{ flexBasis: '100%' }}>{last.message}</span> : null}
+    {/* A finished run lives in Previous runs and versions; only a failed one stays here, because it needs action. */}
+    {last?.status === 'failed' ? <div className="banner err" role="alert">
+      <span><b>Last regenerate failed.</b> Nothing was applied: the feedback above is still open{last.message ? ` · ${last.message}` : ''}. Fix or re-approve it, then regenerate again.</span>
     </div> : null}
     <div className="top">
       <span role="status">{approved.length ? <><b>{approved.length} approved change{approved.length === 1 ? '' : 's'}</b><span className="muted"> → v{nextV}</span></> : <span className="muted">Approve feedback to make v{nextV}</span>}</span>

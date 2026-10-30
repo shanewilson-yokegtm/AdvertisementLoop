@@ -11,8 +11,7 @@ import Share from '@/components/Share';
 import { approvalBlock, assetVersionPath } from '@/lib/creative-loop';
 import { useRecorder, saveVoiceComment, RecordControl } from '@/components/VoiceNote';
 import ProcessFeedback, { activeProcessing, type Processing } from '@/components/Process';
-import FeedbackThread from '@/components/FeedbackThread';
-import ChangeLog from '@/components/ChangeLog';
+import FeedbackThread, { PreviousRuns } from '@/components/FeedbackThread';
 import { useHiggsfieldPoll } from '@/components/Higgsfield';
 import { radioKeys, tab } from '@/lib/radio';
 
@@ -64,7 +63,6 @@ function AssetDetail({ id }: { id: string }) {
   const active = activeProcessing(proc);
   const inFlight = new Set(active?.comment_ids || []);
   const activeNext = active ? (vs.find(x => x.id === active.reviewed_version_id)?.version || 0) + 1 : (latest?.version || 0) + 1;
-  const openCount = comments.rows.filter(c => c.status === 'open' && !c.deleted_at && !inFlight.has(c.id)).length;
 
   const review = async (status: 'approved') => {
     if (blockedApproval) { toast(blockedApproval); return; }
@@ -83,7 +81,8 @@ function AssetDetail({ id }: { id: string }) {
     toast(`Rejected · ${a.concept_name} left the Library`); router.push('/');
   };
   const restore = async () => { const { error } = await sb().from('assets').update({ archived: false }).eq('id', a.id); toast(error ? error.message : 'Restored to the Library'); assets.reload(); };
-  const job = [...jobs.rows].reverse().find((j: any) => j.version_id === v.id && !j.processing_id) || null;
+  // Legacy worker jobs (no run) show only while they still need attention; finished ones belong to history.
+  const job = [...jobs.rows].reverse().find((j: any) => j.version_id === v.id && !j.processing_id && ['queued', 'working', 'needs_input', 'failed'].includes(j.state)) || null;
   const revert = async () => {
     if (!latest) return; setBusy(true);
     const { data, error } = await sb().rpc('revert_asset', { p_asset: a.id, p_from_version: v.id, p_expected_latest: latest.id });
@@ -136,17 +135,10 @@ function AssetDetail({ id }: { id: string }) {
             </div></details> : null}
         </div>
 
-        {v.revision_note ? <div className="note"><b>What changed in v{v.version}: </b>{v.revision_note}</div> : null}
         {v.render?.note && v.file_path ? <div className="muted">{v.render.note}</div> : null}
         {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
 
-        <section className="section" aria-labelledby="fbH">
-          <div className="sechead"><h2 id="fbH">Feedback</h2>{openCount ? <span className="muted small">{openCount} open</span> : null}</div>
-          {!comments.rows.length ? null : manage ? <p className="hint">Approve the changes you want in the next version, then regenerate. This is separate from approving the ad itself.</p>
-            : <p className="hint">{ownerName} decides which feedback goes into the next version.</p>}
-          <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }}>
-            {manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} me={member?.user_id} who={who} /> : null}
-          </FeedbackThread>
+        <section className="section" aria-labelledby="gfH">
           {canComment ? <form className="composer-box" aria-label="Add feedback" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
               if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
               try {
@@ -154,9 +146,9 @@ function AssetDetail({ id }: { id: string }) {
                 else { const pv = document.getElementById('pv') as HTMLVideoElement | null;
                   const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null }); if (error) throw error; }
                 setCmt(''); cmtBase.current = ''; cmtRec.clear(); comments.reload();
-                toast(manage ? 'Feedback added · approve it above' : `Feedback sent to ${ownerName}`);
+                toast(manage ? 'Feedback added · approve it below' : `Feedback sent to ${ownerName}`);
               } catch (err: any) { toast('Not saved · ' + (err?.message || err)); } }}>
-            <label htmlFor="cmt" className="lbl">Add feedback on v{v.version}</label>
+            <div className="sechead"><h2 id="gfH"><label htmlFor="cmt">Give feedback</label></h2><span className="muted small">on v{v.version}{isLatest ? ' (latest)' : ` · older version, latest is v${latest?.version}`}</span></div>
             <textarea id="cmt" rows={3} placeholder="Talk or type what should change" value={cmt} onChange={e => setCmt(e.target.value)} />
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span className="row"><RecordControl r={{ ...cmtRec, start: () => { cmtBase.current = cmt.trim(); return cmtRec.start(); } }} label="Record" />
@@ -164,6 +156,12 @@ function AssetDetail({ id }: { id: string }) {
               <button className="btn primary" disabled={cmtRec.state === 'rec' || !(cmt.trim() || cmtRec.take)}>Add feedback</button></div>
           </form> : <p className="hint">View-only access. Ask Shane for Creator to leave feedback.</p>}
         </section>
+
+        {(() => { const panel = manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} me={member?.user_id} who={who} /> : null;
+          return <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} latestVersion={latest?.version || 0} viewedVersionId={v.id} who={who} audioUrls={audioUrls} toast={toast}
+            reload={() => { comments.reload(); procs.reload(); }} regen={active ? null : panel} progress={active ? panel : null} />; })()}
+
+        <PreviousRuns comments={comments.rows} runs={procs.rows as any} shares={shares.rows} onOpen={selectVersion} vs={vs} manage={manage} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }} />
 
         <div>
           {copyRows.length || v.copy?.cta ? <details className="disc"><summary>Copy</summary><div className="inner">
@@ -178,10 +176,6 @@ function AssetDetail({ id }: { id: string }) {
               <dt>File</dt><dd>{v.width && v.height ? `${v.width}×${v.height} · ` : ''}{v.duration_sec ? fmtSec(v.duration_sec) + ' · ' : ''}{fmtBytes(v.size_bytes)} · {v.content_type || '--'}</dd>
               <dt>Source</dt><dd>{src.link ? <a href={src.link} target="_blank" rel="noopener">Open editable source</a> : 'Not attached'}</dd>
               <dt>SHA-256</dt><dd className="mono">{(v.sha256 || '').slice(0, 16)}…</dd><dt>ID</dt><dd className="mono">{v.id}</dd></dl></div></details>
-          <details className="disc"><summary>History<span className="muted">{vs.length} version{vs.length === 1 ? '' : 's'}{shares.rows.length ? ` · shared ${shares.rows.length}×` : ''}</span></summary><div className="inner">
-            <ChangeLog assetId={a.id} onOpen={selectVersion} refreshKey={`${vs.length}:${comments.rows.filter(c => c.status !== 'open').length}:${proc?.status || ''}`} />
-            {shares.rows.length ? <div className="muted small">{shares.rows.slice(0, 5).map((s: any) => <div key={s.id}>Shared v{vs.find(x => x.id === s.version_id)?.version ?? '?'}{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
-          </div></details>
         </div>
       </div>
     </div>

@@ -148,14 +148,16 @@ const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng
 const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '', decision: 'approved' };
 const cC = { id: 'c-c', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Louder', status: 'dismissed', created_at: '', resolution_note: 'Sound is fine' };
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
-function threadFixture(comments, manage = true, inFlight = []) {
+function threadFixture(comments, manage = true, inFlight = [], runs = [], viewedVersionId) {
   const calls = [];
-  const Thread = source('src/components/FeedbackThread.tsx', {
+  const mod = source('src/components/FeedbackThread.tsx', {
     '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
     '@/lib/data': { fmtDate: () => '', fmtSec: s => String(s) },
-  }).default;
-  const props = { comments, vs: [v1, v2], manage, inFlight: new Set(inFlight), nextVersion: 3, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, reload: () => {} };
-  return { Thread: () => React.createElement(Thread, props), calls };
+  });
+  const props = { comments, vs: [v1, v2], manage, inFlight: new Set(inFlight), nextVersion: 3, latestVersion: 2, viewedVersionId, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, reload: () => {} };
+  const Thread = () => React.createElement(React.Fragment, null, React.createElement(mod.default, props),
+    React.createElement(mod.PreviousRuns, { ...props, runs, shares: [], onOpen: () => {} }));
+  return { Thread, calls };
 }
 function regenFixture(proc, comments, { engine = 'creative/clay/engine.js', me = 'shane' } = {}) {
   const calls = [];
@@ -184,7 +186,10 @@ test('one thread: decided items are kept as history, rejected ones can be undone
   const f = threadFixture([cA, cB, cC], true, ['c-b']); await mount(f.Thread);
   assert.equal(decideBtns('Approve').length, 1, 'only undecided, not-in-flight items get controls');
   const t = document.body.textContent;
-  assert.match(t, /Going into v3/); assert.match(t, /Rejected/); assert.match(t, /Reason: Sound is fine/);
+  assert.match(t, /Going into v3/); assert.match(t, /Reason: Sound is fine/);
+  const hist = document.getElementById('history');
+  assert.ok(hist.contains([...document.querySelectorAll('li')].find(li => /Louder/.test(li.textContent))), 'rejected feedback lives in the history drawer');
+  assert.ok(hist.contains(button('Undo')));
   await act(async () => button('Undo').click()); await flush();
   assert.deepEqual(f.calls.map(c => [c.args.p_comment, c.args.p_decision]), [['c-c', 'undecided']]);
   await finish();
@@ -194,8 +199,77 @@ test('teammates read the full attributed thread without decision controls', asyn
   const f = threadFixture([cA, cB, cC], false); await mount(f.Thread);
   assert.equal(document.querySelectorAll('.decide').length, 0); assert.ok(!button('Undo'));
   const t = document.body.textContent;
-  assert.match(t, /teng/); assert.match(t, /Shorter headline/); assert.match(t, /Waiting for owner/); assert.match(t, /Approved for next version/);
+  assert.match(t, /teng/); assert.match(t, /Shorter headline/); assert.match(t, /Waiting for owner/); assert.match(t, /Approved, not processed/);
   await finish();
+});
+
+test('feedback groups: needs decision, approved-not-processed, in progress, then a closed history', async () => {
+  const applied = { ...cA, id: 'c-ap', body: 'Old applied note', status: 'applied', applied_in: 'asset_v2', version_id: 'asset_v1' };
+  const going = { ...cA, id: 'c-go', body: 'Going now', decision: 'approved' };
+  const runs = [{ id: 'r1', status: 'done', reviewed_version_id: 'asset_v1', result_version_id: 'asset_v2', comment_ids: ['c-ap'], instructions: null, message: null, processor: null, started_by: null, updated_at: '', created_at: '' },
+    { id: 'r2', status: 'failed', reviewed_version_id: 'asset_v2', result_version_id: null, comment_ids: ['c-b'], instructions: null, message: 'render broke', processor: null, started_by: null, updated_at: '', created_at: '' }];
+  const f = threadFixture([cA, cB, cC, applied, going], true, ['c-go'], runs); await mount(f.Thread);
+  const h3 = [...document.querySelectorAll('#fpH ~ .group h3, .group h3')].map(e => e.textContent);
+  assert.deepEqual(h3, ['Needs decision · 1', 'Approved, not processed yet · 1']);
+  const pend = document.querySelector('[aria-labelledby="fpH"]'), prog = document.querySelector('[aria-labelledby="ipH"]'), hist = document.getElementById('history');
+  assert.match(pend.textContent, /2 open/);
+  assert.ok(prog.textContent.includes('Going now') && !pend.textContent.includes('Going now'), 'in-flight items sit under In progress');
+  for (const done of ['Old applied note', 'Louder']) { assert.ok(!pend.textContent.includes(done)); assert.ok(hist.textContent.includes(done)); }
+  assert.equal(hist.tagName, 'DETAILS'); assert.equal(hist.open, false, 'history is closed by default');
+  assert.match(hist.textContent, /Made from 1 approved item/); assert.match(hist.textContent, /Failed .* render broke/);
+  assert.ok(pend.compareDocumentPosition(hist) & 4, 'history comes after the pending feedback');
+  await finish();
+});
+
+test('viewed-version feedback first; older open feedback is counted in a closed "Earlier feedback · still unprocessed" group', async () => {
+  const olds = ['First cut A', 'First cut B', 'First cut C'].map((body, i) => ({ ...cA, id: 'c-old' + i, version_id: 'asset_v1', body, decision: i ? undefined : 'approved' }));
+  const slack = { ...cA, id: 'c-slack', body: 'New Slack note', source: 'slack' };
+  const f = threadFixture([...olds, slack], true, [], [], 'asset_v2'); await mount(f.Thread);
+  const pend = document.querySelector('[aria-labelledby="fpH"]'), earlier = document.getElementById('earlier');
+  assert.match(pend.querySelector('.sechead').textContent, /4 open/, 'older items still counted');
+  assert.ok(pend.contains(earlier), 'stays inside Feedback to process, not history');
+  assert.equal(earlier.open, false); assert.match(earlier.querySelector('summary').textContent, /Earlier feedback · still unprocessed3 · 1 approved/);
+  const first = pend.querySelector('li.fb'); assert.match(first.textContent, /New Slack note/, 'viewed-version feedback comes first');
+  for (const li of earlier.querySelectorAll('li')) { assert.match(li.textContent, /Still unprocessed · from v1/); assert.ok(!/Applied/.test(li.textContent)); }
+  assert.equal(earlier.querySelectorAll('.decide').length, 3, 'still decidable, so nothing is silently dropped');
+  assert.ok(!document.getElementById('history').textContent.includes('First cut'));
+  assert.equal(document.getElementById('history').open, false);
+  await finish();
+});
+
+test('long feedback shows a preview with an accessible expand control', async () => {
+  const long = { ...cA, id: 'c-long', body: 'x'.repeat(400) + ' END', source: 'slack', source_link: 'https://slack/p1', at_sec: 4 };
+  const f = threadFixture([long]); await mount(f.Thread);
+  const li = document.querySelector('li.fb'); const more = button('Show all');
+  assert.ok(!li.textContent.includes('END')); assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.match(li.textContent, /teng/); assert.match(li.textContent, /v2 · at 4/); assert.ok(li.querySelector('a[href="https://slack/p1"]'));
+  await act(async () => more.click());
+  assert.ok(li.textContent.includes('END')); assert.equal(button('Show less').getAttribute('aria-expanded'), 'true');
+  await finish();
+});
+
+test('page order: Give feedback composer first, then feedback to process, then closed history', async () => {
+  const f = reviewFixture([v1, v2], 'v=asset_v1');
+  f.rows.comments = [{ ...cA, version_id: v1.id }];
+  await mount(f.Page);
+  const comp = document.getElementById('cmt'), pend = document.querySelector('[aria-labelledby="fpH"]'), hist = document.getElementById('history');
+  assert.ok(comp && pend && hist);
+  assert.ok(comp.compareDocumentPosition(pend) & 4, 'composer before feedback'); assert.ok(pend.compareDocumentPosition(hist) & 4, 'feedback before history');
+  assert.equal(hist.open, false);
+  assert.match(comp.closest('section').textContent, /Give feedback.*on v1 · older version, latest is v2/);
+  assert.equal(document.getElementById('selected-media').textContent, v1.id, 'still pinned to the opened version');
+  assert.equal([...document.querySelectorAll('summary')].filter(s => /^History/.test(s.textContent)).length, 0, 'no second history drawer');
+  await finish();
+});
+
+test('a failed regenerate stays visible and actionable; a finished one does not banner above the thread', async () => {
+  const base = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], decisions: [], rev: 1, history: [], updated_at: '' };
+  let f = regenFixture({ ...base, status: 'failed', message: 'worker crashed' }, [cA, cB]); await mount(f.Bar);
+  const alert = document.querySelector('[role="alert"]');
+  assert.match(alert.textContent, /Last regenerate failed/); assert.match(alert.textContent, /worker crashed/); assert.match(alert.textContent, /still open/);
+  assert.equal(button('Regenerate ad').disabled, false, 'can try again'); await finish();
+  f = regenFixture({ ...base, status: 'done', result_version_id: 'asset_v2' }, [cA]); await mount(f.Bar);
+  assert.equal(document.querySelector('[role="alert"]'), null); assert.ok(!/ready/i.test(document.body.textContent)); await finish();
 });
 
 test('Regenerate ad sends everything approved (server collects it), not a snapshot', async () => {
