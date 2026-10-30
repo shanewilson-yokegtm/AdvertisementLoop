@@ -13,3 +13,9 @@ Drawn in canvas, rendered to MP4 (30 fps, H.264, silent). No generation credits.
 2. 1.3-6.4s: Post-its with follow-up tasks land around the line, faster and faster, until they cover the screen.
 3. 6.6s: they pop; 6.85-8.6s: they all fall off the screen.
 4. 8.7-13.2s: "Yoke keeps the list. And drafts the message." → Yoke lockup → "Follow-ups that don't depend on memory." → "See how Yoke works".
+
+## v2 (job e750a027, review 0bac038e)
+
+First rendered version from this engine. Both approved notes on v1: sticky-note pile-up around "Is this your follow-up
+strategy?" (newer note's line kept over "Still using sticky notes for follow-up?"); at the pop a Yoke badge slams down on
+the pile and blasts the notes off the screen; tagline end card.

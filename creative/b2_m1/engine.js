@@ -1,6 +1,7 @@
 // B2 M1 "Follow-up strategy" ad engine (9:16). Draws one frame at time t (seconds) into a canvas.
 // Story (Shane, Oct 29): black line "Is this your follow-up strategy?" -> Post-its with follow-up tasks fill in
 // around it until they crowd the whole screen -> they pop -> they all fall off -> tagline end card.
+// v2 (job e750a027): Yoke slams down on the pile at the pop and blasts the notes off the screen.
 const C = { ink: '#111317', canvas: '#F7F4EC', paper: '#FFFFFF', coral: '#F04B37', stone: '#D8D5CD', muted: '#686A63', lime: '#CDF05B' };
 const FONT = '"Instrument Sans", system-ui, sans-serif';
 const W = 1080, H = 1920;
@@ -67,9 +68,11 @@ function drawNote(ctx, n, t) {
   // pop: everything jolts up a touch
   const p = seg(t, T.pop - 0.12, T.pop + 0.18);
   s *= 1 + Math.sin(p * Math.PI) * 0.09 * n.pop;
-  // fall
-  const ft = t - (T.fall + n.fd);
-  if (ft > 0) { y += 0.5 * 4200 * ft * ft - 260 * ft; x += n.vx * ft; rot += n.spin * ft; }
+  // fall (stagger shrunk so the blast reads as one hit)
+  const ft = t - (T.fall + n.fd * 0.35);
+  // v2 (review 0bac038e): Yoke slams in and blasts the notes outward from the centre before they fall
+  if (ft > 0) { const dx = n.x - W / 2, dy = n.y - H / 2, d = Math.hypot(dx, dy) || 1, push = 1100 * Math.exp(-ft * 2.5);
+    y += 0.5 * 4200 * ft * ft - 260 * ft + dy / d * push * ft * 0.6; x += n.vx * ft + dx / d * push * ft; rot += n.spin * ft * 1.6; }
   if (y - n.size > H + 50) return;
   const sz = n.size;
   ctx.save(); ctx.globalAlpha = a; ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
@@ -132,5 +135,24 @@ function drawFrame(canvas, t, logo) {
   ctx.fillStyle = C.canvas; ctx.fillRect(0, 0, W, H);
   drawHook(ctx, t);
   NOTES.forEach(n => drawNote(ctx, n, t));
+  drawYokeSmash(ctx, t, logo);
+}
+
+// v2 (job e750a027, review 0bac038e): Yoke drops in on top of the pile and smashes it; the notes pop off the screen.
+function drawYokeSmash(ctx, t, logo) {
+  const t0 = T.pop - 0.32, d = t - t0; if (d < 0 || t > T.fallEnd) return;
+  const drop = eo(seg(t, t0, T.pop)), hit = t - T.pop;
+  const out = seg(t, T.fallEnd - 0.5, T.fallEnd);
+  const cx = W / 2, cy = lerp(-260, H / 2, drop * drop);
+  // impact ring
+  if (hit > 0 && hit < 0.6) { ctx.save(); ctx.strokeStyle = C.coral; ctx.globalAlpha = 1 - hit / 0.6; ctx.lineWidth = 26 * (1 - hit / 0.6) + 4;
+    ctx.beginPath(); ctx.ellipse(cx, H / 2, 200 + hit * 1500, (200 + hit * 1500) * 0.9, 0, 0, 7); ctx.stroke(); ctx.restore(); }
+  const sq = hit > 0 ? 1 + Math.exp(-hit * 9) * Math.sin(hit * 30) * 0.12 : 1;
+  const bw = 700, bh = 250;
+  ctx.save(); ctx.globalAlpha = 1 - out; ctx.translate(cx, cy); ctx.scale(sq * lerp(1, 0.8, out), (2 - sq) * lerp(1, 0.8, out));
+  ctx.save(); ctx.filter = 'blur(24px)'; ctx.fillStyle = 'rgba(40,30,10,0.35)'; roundRect(ctx, -bw / 2 + 10, -bh / 2 + 30, bw, bh, bh / 2); ctx.fill(); ctx.restore();
+  ctx.fillStyle = C.paper; roundRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2); ctx.fill(); ctx.lineWidth = 8; ctx.strokeStyle = C.ink; ctx.stroke();
+  const lw = 470, lh = lw * (102 / 401.59); ctx.drawImage(logo, -lw / 2, -lh / 2, lw, lh);
+  ctx.restore();
 }
 window.drawFrame = drawFrame; window.TOTAL = T.total;
