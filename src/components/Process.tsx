@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
 import { fmtDate, type Asset, type Comment, type Version } from '@/lib/data';
 
@@ -15,112 +15,102 @@ export type Decision = { comment_id: string; decision: 'apply' | 'defer' | 'dism
 const friendly = (e: any) => String(e?.message || e).replace(/^.*?: /, '');
 export const activeProcessing = (p: Processing | null) => (p && ['approved', 'executing'].includes(p.status) ? p : null);
 
-/** Owner/admin only. One primary action: Regenerate ad sends every approved, open feedback item (the server collects
- *  them at the moment of pressing) into the next version. The revision worker runs on a schedule, so a queued
- *  request says so instead of promising an instant result. */
 /** The scheduled worker can only rebuild versions made with a repo engine (creative/...). Anything else is made in a person's Claude. */
 export const workerCanRebuild = (v?: Version | null) => typeof v?.source?.engine === 'string' && v.source.engine.startsWith('creative/');
 
-export default function ProcessFeedback({ a, vs, comments, proc, reload, toast, onOpen, me, who }: {
+/** Owner/admin only: the single "Process feedback" action in the top row. It sends every included (approved), open
+ *  feedback item (the server collects them when pressed) into the next version, routed by how the ad was made:
+ *  the scheduled worker, a paid Higgsfield render (confirmed first), or a manual hand-off to the owner's Claude.
+ *  Confirmation and hand-off open on demand; while a run is active there is only a compact status line. */
+export default function ProcessFeedback({ a, vs, comments, proc, reload, toast, me, who }: {
   a: Asset; vs: Version[]; comments: Comment[]; proc: Processing | null; reload: () => void;
-  toast: (m: string) => void; onOpen: (versionId: string) => void; me?: string | null; who?: (id?: string | null) => string; audioUrls?: unknown; ownerName?: string;
+  toast: (m: string) => void; onOpen?: (versionId: string) => void; me?: string | null; who?: (id?: string | null) => string;
 }) {
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState(''); const [confirm, setConfirm] = useState(false);
+  const [open, setOpen] = useState<null | 'higgsfield' | 'claude'>(null);
   const [used, setUsed] = useState<{ seconds_this_month: number; monthly_cap_seconds: number | null } | null>(null);
+  const wrap = useRef<HTMLSpanElement>(null);
   const active = activeProcessing(proc);
-  const inFlight = new Set(active?.comment_ids || []);
-  const approved = comments.filter(c => c.status === 'open' && !c.deleted_at && !inFlight.has(c.id) && c.decision === 'approved');
+  const included = comments.filter(c => c.status === 'open' && !c.deleted_at && c.decision === 'approved' && !active?.comment_ids.includes(c.id));
   const latest = vs[vs.length - 1];
   const nextV = (latest?.version || 0) + 1;
   const activeNext = active ? (vs.find(v => v.id === active.reviewed_version_id)?.version || 0) + 1 : nextV;
-  // A finished Higgsfield video regenerates in Higgsfield (paid, confirmed here); everything else goes to the worker.
   const parent = [...vs].reverse().find(v => v.file_path);
   const hfSpec = parent?.spec?.type === 'higgsfield' && parent.render?.state !== 'failed' ? parent.spec : null;
   const viaClaude = !hfSpec && !workerCanRebuild(parent);
   const prompt = `Make the next version of “${a.concept_name.trim()}” in Ad Studio with its approved feedback (ad ${a.id}).`;
-  const last = proc && ['done', 'failed'].includes(proc.status) ? proc : null;
+  const failed = !active && proc?.status === 'failed' ? proc : null;
 
-  const regenerate = async () => {
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null); };
+    const out = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(null); };
+    document.addEventListener('keydown', esc); document.addEventListener('mousedown', out);
+    return () => { document.removeEventListener('keydown', esc); document.removeEventListener('mousedown', out); };
+  }, [open]);
+
+  const press = async () => {
+    if (hfSpec) {
+      setOpen('higgsfield');
+      try { const r = await fetch('/api/higgsfield/usage'); if (r.ok) setUsed(await r.json()); } catch { /* usage is informative only */ }
+      return;
+    }
+    if (viaClaude) { setOpen('claude'); return; }
     setBusy(true);
-    const { error } = await sb().rpc('feedback_process', { p_asset: a.id, p_note: note.trim() || null });
-    if (error) toast(friendly(error));
-    else { toast(`Queued · Claude picks up v${nextV} within the hour`); setNote(''); }
+    const { error } = await sb().rpc('feedback_process', { p_asset: a.id, p_note: null });
+    toast(error ? friendly(error) : `Queued · Claude picks up v${nextV} within the hour`);
     setBusy(false); reload();
   };
-  const askHiggsfield = async () => {
-    setConfirm(true);
-    try { const r = await fetch('/api/higgsfield/usage'); if (r.ok) setUsed(await r.json()); } catch { /* usage is informative only */ }
-  };
-  const regenerateHiggsfield = async () => {
+  const renderHiggsfield = async () => {
     setBusy(true);
     try {
-      const r = await fetch('/api/higgsfield/revise', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ asset_id: a.id, note: note.trim() || null, confirm: true }) });
+      const r = await fetch('/api/higgsfield/revise', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ asset_id: a.id, note: null, confirm: true }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) toast(j.message || 'Not started'); else { toast(j.repeated ? 'Already rendering' : `Rendering v${nextV} in Higgsfield`); setNote(''); setConfirm(false); }
+      if (!r.ok) toast(j.message || 'Not started'); else { toast(j.repeated ? 'Already rendering' : `Rendering v${nextV} in Higgsfield`); setOpen(null); }
     } catch { toast('No answer. It may have started: check before trying again.'); }
     setBusy(false); reload();
   };
-  const cancel = async () => {
+  const copy = async () => { try { await navigator.clipboard.writeText(prompt); toast('Copied · paste it into Claude'); setOpen(null); } catch { toast('Select the text and copy it'); } };
+  const cancel = async (message: string) => {
     if (!active) return; setBusy(true);
-    const { error } = await sb().rpc('processing_set_status', { p_id: active.id, p_rev: active.rev, p_status: 'cancelled', p_message: 'Cancelled before Claude started' });
-    toast(error ? friendly(error) : 'Cancelled · feedback stays approved'); setBusy(false); reload();
+    const { error } = await sb().rpc('processing_set_status', { p_id: active.id, p_rev: active.rev, p_status: 'cancelled', p_message: message });
+    toast(error ? friendly(error) : 'Cancelled · feedback stays included'); setBusy(false); reload();
   };
 
-  if (active && active.engine === 'claude') {
+  const n = active ? active.comment_ids.length : 0;
+  const items = `${n} item${n === 1 ? '' : 's'} marked below`;
+  let status: React.ReactNode = null;
+  if (active?.engine === 'claude') {
     const mine = !!me && active.claimed_by === me;
-    return <section id="process-panel" className="regen" aria-label="Next version">
-      <div className="top" role="status"><div className="row">
-        <span className="chip live"><span className="dot" />{mine ? `You’re making v${activeNext} in Claude` : `${who ? who(active.claimed_by) : 'Someone'} is making v${activeNext} in Claude`}</span>
-        {active.claimed_at ? <span className="muted small">since {fmtDate(active.claimed_at)}</span> : null}</div>
-        {mine ? <button className="btn small ghost" disabled={busy} onClick={async () => {
-          setBusy(true); const { error } = await sb().rpc('processing_set_status', { p_id: active.id, p_rev: active.rev, p_status: 'cancelled', p_message: 'Cancelled in the app' });
-          toast(error ? friendly(error) : 'Cancelled · feedback stays approved'); setBusy(false); reload(); }}>Cancel</button> : null}</div>
-      <span className="muted small">{active.comment_ids.length} approved change{active.comment_ids.length === 1 ? '' : 's'} frozen when it started{active.instructions ? ' + a note' : ''}. It appears here when Claude saves it. New feedback goes into the version after.</span>
-    </section>;
+    status = <><span className="chip live"><span className="dot" />{mine ? `You’re making v${activeNext} in Claude` : `${who ? who(active.claimed_by) : 'Someone'} is making v${activeNext} in Claude`}</span>
+      <span className="muted small">{items}{active.claimed_at ? ` · since ${fmtDate(active.claimed_at)}` : ''}</span>
+      {mine ? <button type="button" className="linkish" disabled={busy} onClick={() => cancel('Cancelled in the app')}>Cancel</button> : null}</>;
+  } else if (active?.engine === 'higgsfield') {
+    status = <><span className="chip live"><span className="dot" />Rendering v{activeNext} in Higgsfield</span><span className="muted small">{items}{active.message ? ` · ${active.message}` : ''}</span></>;
+  } else if (active) {
+    status = <><span className="chip live"><span className="dot" />{active.status === 'executing' ? `Claude is making v${activeNext}` : `Queued for v${activeNext}`}</span>
+      <span className="muted small">{items} · {active.status === 'executing' ? `started ${fmtDate(active.updated_at)}` : 'Claude starts within the hour'}</span>
+      {active.status === 'approved' ? <button type="button" className="linkish" disabled={busy} onClick={() => cancel('Cancelled before Claude started')}>Cancel</button> : null}</>;
   }
 
-  if (active && active.engine === 'higgsfield') return <section id="process-panel" className="regen" aria-label="Next version">
-    <div className="top" role="status"><div className="row">
-      <span className="chip live"><span className="dot" />Rendering v{activeNext} in Higgsfield</span>
-      <span className="muted small">Usually a few minutes. Saved here when ready.</span></div></div>
-    <span className="muted small">{active.comment_ids.length} approved change{active.comment_ids.length === 1 ? '' : 's'} frozen when you pressed Regenerate{active.instructions ? ' + your note' : ''}. New feedback goes into the version after.</span>
-    {active.message ? <div className="banner" role="alert">{active.message}</div> : null}
-  </section>;
-
-  if (active) return <section id="process-panel" className="regen" aria-label="Next version">
-    <div className="top" role="status">
-      <div className="row">
-        <span className="chip live"><span className="dot" />{active.status === 'executing' ? `Claude is making v${activeNext}` : `Queued for v${activeNext}`}</span>
-        <span className="muted small">{active.status === 'executing' ? `Started ${fmtDate(active.updated_at)}` : 'Claude starts within the hour'}</span>
-      </div>
-      {active.status === 'approved' ? <button className="btn small ghost" disabled={busy} onClick={cancel}>Cancel</button> : null}
-    </div>
-    <span className="muted small">{active.comment_ids.length} approved change{active.comment_ids.length === 1 ? '' : 's'}{active.instructions ? ' + your note' : ''}. New feedback goes into the version after.</span>
-  </section>;
-
-  return <section id="process-panel" className="regen" aria-label="Next version">
-    {/* A finished run lives in Previous runs and versions; only a failed one stays here, because it needs action. */}
-    {last?.status === 'failed' ? <div className="banner err" role="alert">
-      <span><b>Last regenerate failed.</b> Nothing was applied: the feedback above is still open{last.message ? ` · ${last.message}` : ''}. Fix or re-approve it, then regenerate again.</span>
-    </div> : null}
-    <div className="top">
-      <span role="status">{approved.length ? <><b>{approved.length} approved change{approved.length === 1 ? '' : 's'}</b><span className="muted"> → v{nextV}</span></> : <span className="muted">Approve feedback to make v{nextV}</span>}</span>
-      {hfSpec ? <button className="btn primary" disabled={busy || confirm || (!approved.length && !note.trim())} onClick={askHiggsfield}>Regenerate in Higgsfield</button>
-        : viaClaude ? <button className="btn primary" disabled={!approved.length} onClick={async () => { try { await navigator.clipboard.writeText(prompt); toast('Copied · paste it into Claude'); } catch { toast('Select the text and copy it'); } }}>Continue in Claude</button>
-        : <button className="btn primary" disabled={busy || (!approved.length && !note.trim())} onClick={regenerate}>Regenerate ad</button>}
-    </div>
-    {viaClaude && approved.length ? <p className="hint" style={{ margin: 0 }}>
-      This ad was made in {String(parent?.source?.tool || 'Claude')}, which the hourly worker can’t rebuild. Paste the copied request into Claude with the Ad Studio connector:
-      it claims this run, sees only the approved items, and saves the new version here. <span className="mono">{prompt}</span></p> : null}
-    {hfSpec && confirm ? <div className="banner" role="alertdialog" aria-label="Confirm paid render">
-      <span>Paid render: {hfSpec.duration}s · {hfSpec.aspect_ratio} · {hfSpec.audio ? 'with sound' : 'no sound'}{used ? ` · ${used.seconds_this_month}s used this month${used.monthly_cap_seconds ? ` of ${used.monthly_cap_seconds}` : ''}` : ''}</span>
-      <span className="row"><button className="btn small" disabled={busy} onClick={() => setConfirm(false)}>Not now</button><button className="btn small primary" disabled={busy} onClick={regenerateHiggsfield}>Render v{nextV}</button></span>
-    </div> : null}
-    {viaClaude ? null : <details>
-      <summary>Add a note for Claude</summary>
-      <label htmlFor="proc-instr" className="sr">Note for Claude (optional)</label>
-      <textarea id="proc-instr" rows={2} style={{ marginTop: 8 }} placeholder="e.g. keep Henry’s visual, use Teng’s headline" value={note} onChange={e => setNote(e.target.value)} />
-    </details>}
-  </section>;
+  const why = active ? 'A version is already being made' : !included.length ? 'Include feedback below to process it' : `Make v${nextV} from ${included.length} included item${included.length === 1 ? '' : 's'}`;
+  return <>
+    <span className="proc" ref={wrap}>
+      <button type="button" className="btn primary" id="process-feedback" disabled={busy || !!active || !included.length} title={why}
+        aria-haspopup={hfSpec || viaClaude ? 'dialog' : undefined} aria-expanded={hfSpec || viaClaude ? !!open : undefined} onClick={press}>Process feedback</button>
+      {open === 'higgsfield' && hfSpec ? <div className="pop" role="alertdialog" aria-label="Confirm paid render">
+        <b>Paid Higgsfield render of v{nextV}</b>
+        <span className="muted small">{included.length} included item{included.length === 1 ? '' : 's'} · {hfSpec.duration}s · {hfSpec.aspect_ratio} · {hfSpec.audio ? 'with sound' : 'no sound'}{used ? ` · ${used.seconds_this_month}s used this month${used.monthly_cap_seconds ? ` of ${used.monthly_cap_seconds}` : ''}` : ''}</span>
+        <span className="row"><button type="button" className="btn small" disabled={busy} onClick={() => setOpen(null)}>Not now</button><button type="button" className="btn small primary" disabled={busy} onClick={renderHiggsfield}>Render v{nextV}</button></span>
+      </div> : null}
+      {open === 'claude' ? <div className="pop" role="dialog" aria-label="Process in Claude">
+        <b>Made in {String(parent?.source?.tool || 'Claude')}: process it in Claude</b>
+        <span className="muted small">The hourly worker can’t rebuild this ad. Paste this into Claude with the Ad Studio connector. It claims the run, sees only the {included.length} included item{included.length === 1 ? '' : 's'}, and saves v{nextV} here.</span>
+        <span className="mono small">{prompt}</span>
+        <span className="row"><button type="button" className="btn small" onClick={() => setOpen(null)}>Close</button><button type="button" className="btn small primary" onClick={copy}>Copy request</button></span>
+      </div> : null}
+    </span>
+    {status ? <span className="procnote" role="status">{status}</span>
+      : failed ? <span className="procnote err" role="alert"><b>Last run failed.</b> Nothing was applied; the feedback is still open{failed.message ? ` · ${failed.message}` : ''}. Process feedback again to retry.</span> : null}
+  </>;
 }

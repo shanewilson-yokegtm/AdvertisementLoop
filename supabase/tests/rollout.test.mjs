@@ -46,7 +46,7 @@ function reviewFixture(initial = [v1], query = '') {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
     'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); }, push: url => { pushed.push(url); } }) },
     '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {}, frameLabel: (v, f) => f },
-    '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }), activeProcessing: p => (p && ['approved', 'executing'].includes(p.status) ? p : null) },
+    '@/components/Process': { __esModule: true, default: () => React.createElement('button', { id: 'process-panel', type: 'button' }, 'Process feedback'), activeProcessing: p => (p && ['approved', 'executing'].includes(p.status) ? p : null) },
     '@/components/ChangeLog': { __esModule: true, default: () => null },
     '@/components/Higgsfield': { useHiggsfieldPoll: () => {} },
     '@/lib/supabase/browser': { sb: () => ({ from: table => ({ insert: async row => { writes.push({ table, ...row }); return { error: null }; }, upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
@@ -104,13 +104,17 @@ test('one feedback box: needs text, then saves feedback on the version being vie
   await finish();
 });
 
-test('the action row is Approve, Reject ad, Share, Download; More only when it has items', async () => {
+test('two action rows: Process feedback, Approve, Reject ad; then Share, Download; More only when it has items', async () => {
   let f = reviewFixture(); await mount(f.Page);
-  const row = button('Share').parentElement;
-  assert.deepEqual([...row.children].filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['Approve v1', 'Reject ad', 'Share', 'Download']);
-  assert.ok(!row.querySelector('summary[aria-label="More actions"]'), 'no empty More menu');
+  const rows = [...document.querySelectorAll('.actions')];
+  assert.equal(rows.length, 2);
+  const labels = r => [...r.children].filter(e => e.tagName === 'BUTTON').map(b => b.textContent);
+  assert.deepEqual(labels(rows[0]), ['Process feedback', 'Approve v1', 'Reject ad']);
+  assert.deepEqual(labels(rows[1]), ['Share', 'Download']);
+  assert.ok(!rows[1].querySelector('summary[aria-label="More actions"]'), 'no empty More menu');
+  assert.equal([...document.querySelectorAll('button')].filter(b => b.textContent === 'Process feedback').length, 1, 'one process action, at the top');
   assert.equal([...document.querySelectorAll('button')].filter(b => b.textContent.startsWith('Reject ad')).length, 1, 'one Reject ad, not duplicated in a menu');
-  for (const label of ['Iterate with Claude', 'Upload new version', 'Suggest a change', 'Share for review']) assert.equal(button(label), undefined, label + ' gone');
+  for (const label of ['Iterate with Claude', 'Upload new version', 'Suggest a change', 'Share for review', 'Regenerate ad', 'Continue in Claude']) assert.equal(button(label), undefined, label + ' gone');
   await finish();
   f = reviewFixture(); f.rows.assets = [{ ...asset, archived: true }]; await mount(f.Page);
   assert.ok(!buttonStarting('Reject ad'), 'archived ads have no Reject');
@@ -118,7 +122,6 @@ test('the action row is Approve, Reject ad, Share, Download; More only when it h
   assert.ok(more && more.parentElement.querySelector('.menu').contains(button('Restore to Library')), 'Restore stays reachable under More');
   await finish();
 });
-
 test('reject removes the ad from the Library', async () => {
   const f = reviewFixture(); await mount(f.Page);
   await act(async () => buttonStarting('Reject ad').click());
@@ -132,23 +135,21 @@ test('a member who does not own the ad can comment but cannot revise, reject or 
   const f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
   for (const label of ['Share', 'Download']) assert.ok(button(label), label + ' shown');
   assert.ok(!buttonStarting('Reject ad'), 'Reject ad hidden'); assert.ok(!button('Revert to v1'), 'Revert hidden');
-  assert.equal(document.querySelectorAll('.decide').length, 0, 'no approve/reject controls on someone else’s ad');
-  assert.equal(document.getElementById('process-panel'), null);
+  assert.equal(document.querySelectorAll('.incl').length, 0, 'no include controls on someone else’s ad');
+  assert.equal(document.getElementById('process-panel'), null); assert.ok(!button('Process feedback'));
   assert.ok(document.getElementById('cmt'), 'comment box available');
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-test('the owner sees Regenerate once there is feedback, and can revert an older version', async () => {
+test('the owner always has Process feedback at the top, and can revert an older version', async () => {
   member = { user_id: 'shane', role: 'creator' };
-  let f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
-  assert.equal(document.getElementById('process-panel'), null, 'no Regenerate bar with nothing to act on'); await finish();
-  f = reviewFixture([v1, v2], 'v=asset_v1'); f.rows.comments = [{ id: 'c1', asset_id: 'asset', version_id: v1.id, author: 'teng', body: 'Bigger logo', status: 'open', created_at: '' }]; await mount(f.Page);
-  assert.ok(document.getElementById('process-panel'));
+  const f = reviewFixture([v1, v2], 'v=asset_v1'); f.rows.comments = [{ id: 'c1', asset_id: 'asset', version_id: v1.id, author: 'teng', body: 'Bigger logo', status: 'open', created_at: '' }]; await mount(f.Page);
+  assert.ok(document.querySelector('.actions').contains(document.getElementById('process-panel')));
   assert.ok(button('Revert to v1'));
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-// ---------- Feedback: one thread (approve/reject per item) + one Regenerate ad action (real components) ----------
+// ---------- Feedback: one running list (Include per item) + one Process feedback action at the top (real components) ----------
 const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng', body: 'Shorter headline', status: 'open', created_at: '' };
 const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '', decision: 'approved' };
 const cC = { id: 'c-c', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Louder', status: 'dismissed', created_at: '', resolution_note: 'Sound is fine' };
@@ -173,25 +174,28 @@ function regenFixture(proc, comments, { engine = 'creative/clay/engine.js', me =
   const props = { a: asset, vs: [v1, { ...v2, source: engine ? { engine, tool: 'Claude' } : { tool: 'Claude Design' } }], comments, proc, reload: () => {}, toast: () => {}, onOpen: () => {}, me, who: id => ({ teng: 'Teng He', shane: 'Shane' })[id] || 'Someone' };
   return { Bar: () => React.createElement(Bar, props), calls };
 }
-const decideBtns = label => [...document.querySelectorAll('.decide button')].filter(b => b.textContent === label);
+const includes = () => [...document.querySelectorAll('.incl input')];
+const rejectFb = () => [...document.querySelectorAll('button')].filter(b => b.textContent === 'Reject feedback');
 
-test('owner: Approve and Reject on each item save right away; Approve again undoes', async () => {
+test('owner: Include ticks save as approved/undecided right away; Reject feedback is a small separate action', async () => {
   const f = threadFixture([cA, cB]); await mount(f.Thread);
   assert.equal(f.calls.length, 0, 'opening the ad changes nothing');
-  assert.equal(decideBtns('Approve')[0].getAttribute('aria-pressed'), 'false');
-  assert.equal(decideBtns('Approve')[1].getAttribute('aria-pressed'), 'true');
-  await act(async () => decideBtns('Approve')[0].click()); await flush();
-  await act(async () => decideBtns('Reject')[0].click()); await flush();
-  await act(async () => decideBtns('Approve')[1].click()); await flush();
-  assert.deepEqual(f.calls.map(c => [c.args.p_comment, c.args.p_decision]), [['c-a', 'approved'], ['c-a', 'rejected'], ['c-b', 'undecided']]);
+  assert.equal(document.querySelectorAll('.decide').length, 0, 'no Approve/Reject pair on each comment');
+  const byBody = body => [...document.querySelectorAll('li.fb')].find(li => li.textContent.includes(body));
+  const incA = byBody('Shorter headline').querySelector('.incl input'), incB = byBody('Coral CTA').querySelector('.incl input');
+  assert.equal(incA.checked, false); assert.equal(incB.checked, true);
+  assert.match(incA.getAttribute('aria-label'), /Include teng’s feedback in the next version/);
+  await act(async () => incA.click()); await flush();
+  await act(async () => byBody('Shorter headline').querySelector('.linkish').click()); await flush();
+  await act(async () => incB.click()); await flush();
+  assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_comment, c.args.p_decision]), [['feedback_decide', 'c-a', 'approved'], ['feedback_decide', 'c-a', 'rejected'], ['feedback_decide', 'c-b', 'undecided']]);
   await finish();
 });
-
 test('one thread: decided items are kept as history, rejected ones can be undone by the owner', async () => {
   const f = threadFixture([cA, cB, cC], true, ['c-b']); await mount(f.Thread);
-  assert.equal(decideBtns('Approve').length, 1, 'only undecided, not-in-flight items get controls');
+  assert.equal(includes().length, 1, 'only open, not-processing items get an Include control');
   const t = document.body.textContent;
-  assert.match(t, /Going into v3/); assert.match(t, /Reason: Sound is fine/);
+  assert.match(t, /Processing into v3/); assert.match(t, /Reason: Sound is fine/);
   const hist = document.getElementById('history');
   assert.ok(hist.contains([...document.querySelectorAll('li')].find(li => /Louder/.test(li.textContent))), 'rejected feedback lives in the history drawer');
   assert.ok(hist.contains(button('Undo')));
@@ -202,50 +206,37 @@ test('one thread: decided items are kept as history, rejected ones can be undone
 
 test('teammates read the full attributed thread without decision controls', async () => {
   const f = threadFixture([cA, cB, cC], false); await mount(f.Thread);
-  assert.equal(document.querySelectorAll('.decide').length, 0); assert.ok(!button('Undo'));
+  assert.equal(includes().length, 0); assert.equal(rejectFb().length, 0); assert.ok(!button('Undo'));
   const t = document.body.textContent;
-  assert.match(t, /teng/); assert.match(t, /Shorter headline/); assert.match(t, /Waiting for owner/); assert.match(t, /Approved, not processed/);
+  assert.match(t, /teng/); assert.match(t, /Shorter headline/); assert.match(t, /Waiting for owner/); assert.match(t, /Included by owner/);
   await finish();
 });
 
-test('feedback groups: needs decision, approved-not-processed, in progress, then a closed history', async () => {
+test('one running list holds every open and processing comment, any version; done items only in the closed history', async () => {
   const applied = { ...cA, id: 'c-ap', body: 'Old applied note', status: 'applied', applied_in: 'asset_v2', version_id: 'asset_v1' };
   const going = { ...cA, id: 'c-go', body: 'Going now', decision: 'approved' };
+  const old = { ...cA, id: 'c-old', version_id: 'asset_v1', body: 'From the first cut' };
+  const orphan = { ...cA, id: 'c-orph', body: 'Applied somewhere unknown', status: 'applied', applied_in: null };
   const runs = [{ id: 'r1', status: 'done', reviewed_version_id: 'asset_v1', result_version_id: 'asset_v2', comment_ids: ['c-ap'], instructions: null, message: null, processor: null, started_by: null, updated_at: '', created_at: '' },
     { id: 'r2', status: 'failed', reviewed_version_id: 'asset_v2', result_version_id: null, comment_ids: ['c-b'], instructions: null, message: 'render broke', processor: null, started_by: null, updated_at: '', created_at: '' }];
-  const orphan = { ...cA, id: 'c-orph', body: 'Applied somewhere unknown', status: 'applied', applied_in: null };
-  const f = threadFixture([cA, cB, cC, applied, going, orphan], true, ['c-go'], runs); await mount(f.Thread);
-  const h3 = [...document.querySelectorAll('#fpH ~ .group h3, .group h3')].map(e => e.textContent);
-  assert.deepEqual(h3, ['Needs decision · 1', 'Approved, not processed yet · 1']);
-  const pend = document.querySelector('[aria-labelledby="fpH"]'), prog = document.querySelector('[aria-labelledby="ipH"]'), hist = document.getElementById('history');
-  assert.match(pend.textContent, /2 open/);
-  assert.ok(prog.textContent.includes('Going now') && !pend.textContent.includes('Going now'), 'in-flight items sit under In progress');
-  for (const done of ['Old applied note', 'Louder']) { assert.ok(!pend.textContent.includes(done)); assert.ok(hist.textContent.includes(done)); }
+  const f = threadFixture([old, cA, cB, cC, applied, going, orphan], true, ['c-go'], runs); await mount(f.Thread);
+  const pend = document.querySelector('[aria-labelledby="fpH"]'), hist = document.getElementById('history');
+  assert.equal(pend.querySelectorAll('ul').length, 1, 'one list'); assert.equal(pend.querySelectorAll('h3, details').length, 0, 'no subgroup headings or folders');
+  assert.equal(document.querySelector('[aria-labelledby="ipH"]'), null, 'no separate In progress section');
+  assert.equal(document.getElementById('earlier'), null, 'no Earlier feedback folder');
+  const items = [...pend.querySelectorAll('li')].map(li => li.textContent);
+  assert.equal(items.length, 4); assert.match(items[0], /Going now.*Processing into v3/, 'processing items lead, marked inline');
+  const oldLi = items.find(t => t.includes('From the first cut'));
+  assert.match(oldLi, /v1/); assert.match(oldLi, /Still unprocessed · from v1/); assert.doesNotMatch(oldLi, /Applied/);
+  assert.match(pend.querySelector('.sechead').textContent, /3 open · 1 included · 1 processing/);
+  for (const done of ['Old applied note', 'Louder', 'Applied somewhere unknown']) { assert.ok(!pend.textContent.includes(done)); assert.ok(hist.textContent.includes(done)); }
   assert.equal(hist.tagName, 'DETAILS'); assert.equal(hist.open, false, 'history is closed by default');
-  assert.match(hist.textContent, /Made from 1 approved item/);
+  assert.match(hist.textContent, /Made from 1 approved item/); assert.match(hist.textContent, /Failed .* render broke/);
   const orph = [...hist.querySelectorAll('.hist')].find(d => /Applied, version not recorded · 1/.test(d.textContent));
   assert.ok(orph && /Applied somewhere unknown/.test(orph.textContent), 'applied items with no matching version stay in history');
-  assert.ok(!pend.textContent.includes('Applied somewhere unknown')); assert.match(hist.textContent, /Failed .* render broke/);
-  assert.ok(pend.compareDocumentPosition(hist) & 4, 'history comes after the pending feedback');
+  assert.ok(pend.compareDocumentPosition(hist) & 4, 'history comes after the list');
   await finish();
 });
-
-test('viewed-version feedback first; older open feedback is counted in a closed "Earlier feedback · still unprocessed" group', async () => {
-  const olds = ['First cut A', 'First cut B', 'First cut C'].map((body, i) => ({ ...cA, id: 'c-old' + i, version_id: 'asset_v1', body, decision: i ? undefined : 'approved' }));
-  const slack = { ...cA, id: 'c-slack', body: 'New Slack note', source: 'slack' };
-  const f = threadFixture([...olds, slack], true, [], [], 'asset_v2'); await mount(f.Thread);
-  const pend = document.querySelector('[aria-labelledby="fpH"]'), earlier = document.getElementById('earlier');
-  assert.match(pend.querySelector('.sechead').textContent, /4 open/, 'older items still counted');
-  assert.ok(pend.contains(earlier), 'stays inside Feedback to process, not history');
-  assert.equal(earlier.open, false); assert.match(earlier.querySelector('summary').textContent, /Earlier feedback · still unprocessed3 · 1 approved/);
-  const first = pend.querySelector('li.fb'); assert.match(first.textContent, /New Slack note/, 'viewed-version feedback comes first');
-  for (const li of earlier.querySelectorAll('li')) { assert.match(li.textContent, /Still unprocessed · from v1/); assert.ok(!/Applied/.test(li.textContent)); }
-  assert.equal(earlier.querySelectorAll('.decide').length, 3, 'still decidable, so nothing is silently dropped');
-  assert.ok(!document.getElementById('history').textContent.includes('First cut'));
-  assert.equal(document.getElementById('history').open, false);
-  await finish();
-});
-
 test('long feedback shows a preview with an accessible expand control', async () => {
   const long = { ...cA, id: 'c-long', body: 'x'.repeat(400) + ' END', source: 'slack', source_link: 'https://slack/p1', at_sec: 4 };
   const f = threadFixture([long]); await mount(f.Thread);
@@ -265,42 +256,45 @@ test('page order: Give feedback composer first, then feedback to process, then c
   assert.ok(comp && pend && hist);
   assert.ok(comp.compareDocumentPosition(pend) & 4, 'composer before feedback'); assert.ok(pend.compareDocumentPosition(hist) & 4, 'feedback before history');
   assert.equal(hist.open, false);
+  const after = [...document.querySelectorAll('button')].filter(b => pend.compareDocumentPosition(b) & 4 || pend.contains(b)).map(b => b.textContent);
+  for (const l of ['Process feedback', 'Regenerate ad', 'Continue in Claude', 'Regenerate in Higgsfield']) assert.ok(!after.includes(l), l + ' not under the list');
+  assert.doesNotMatch(document.body.textContent, /Approve feedback to make|Add a note for Claude/);
   assert.match(comp.closest('section').textContent, /Give feedback.*on v1 · older version, latest is v2/);
   assert.equal(document.getElementById('selected-media').textContent, v1.id, 'still pinned to the opened version');
   assert.equal([...document.querySelectorAll('summary')].filter(s => /^History/.test(s.textContent)).length, 0, 'no second history drawer');
   await finish();
 });
 
-test('a failed regenerate stays visible and actionable; a finished one does not banner above the thread', async () => {
+test('a failed run is a compact, actionable note beside Process feedback; a finished one leaves nothing behind', async () => {
   const base = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], decisions: [], rev: 1, history: [], updated_at: '' };
   let f = regenFixture({ ...base, status: 'failed', message: 'worker crashed' }, [cA, cB]); await mount(f.Bar);
   const alert = document.querySelector('[role="alert"]');
-  assert.match(alert.textContent, /Last regenerate failed/); assert.match(alert.textContent, /worker crashed/); assert.match(alert.textContent, /still open/);
-  assert.equal(button('Regenerate ad').disabled, false, 'can try again'); await finish();
+  assert.match(alert.textContent, /Last run failed/); assert.match(alert.textContent, /worker crashed/); assert.match(alert.textContent, /still open/);
+  assert.equal(button('Process feedback').disabled, false, 'can try again'); await finish();
   f = regenFixture({ ...base, status: 'done', result_version_id: 'asset_v2' }, [cA]); await mount(f.Bar);
-  assert.equal(document.querySelector('[role="alert"]'), null); assert.ok(!/ready/i.test(document.body.textContent)); await finish();
+  assert.equal(document.querySelector('[role="alert"]'), null); assert.equal(document.querySelector('[role="status"]'), null); await finish();
 });
-
-test('Regenerate ad sends everything approved (server collects it), not a snapshot', async () => {
+test('Process feedback (worker ad) sends everything included (server collects it), not a snapshot', async () => {
   let f = regenFixture(null, [cA]); await mount(f.Bar);
-  assert.equal(button('Regenerate ad').disabled, true, 'nothing approved yet'); await finish();
+  assert.equal(button('Process feedback').disabled, true, 'nothing included yet');
+  assert.equal(button('Process feedback').title, 'Include feedback below to process it'); await finish();
   f = regenFixture(null, [cA, cB]); await mount(f.Bar);
-  assert.match(document.body.textContent, /1 approved change → v3/);
-  await act(async () => button('Regenerate ad').click()); await flush();
+  assert.equal(button('Process feedback').title, 'Make v3 from 1 included item');
+  await act(async () => button('Process feedback').click()); await flush();
   assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_asset]), [['feedback_process', 'asset']]);
+  assert.equal(document.querySelector('[role="dialog"], [role="alertdialog"]'), null, 'worker ads need no extra step');
   await finish();
 });
-
-test('after Regenerate, the owner sees it queued (no instant promise) and can cancel before Claude starts', async () => {
+test('while queued: compact status, Process feedback locked (no second run), cancel before Claude starts', async () => {
   const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'approved', decisions: [{ comment_id: 'c-b', decision: 'apply' }], rev: 4, history: [] };
   const f = regenFixture(proc, [cA, cB]); await mount(f.Bar);
-  assert.match(document.body.textContent, /Queued for v3/); assert.match(document.body.textContent, /Claude starts within the hour/);
-  assert.ok(!button('Regenerate ad'), 'no second request while one is queued');
+  const st = document.querySelector('[role="status"]').textContent;
+  assert.match(st, /Queued for v3/); assert.match(st, /1 item marked below/); assert.match(st, /Claude starts within the hour/);
+  assert.equal(button('Process feedback').disabled, true, 'no second request while one is queued');
   await act(async () => button('Cancel').click()); await flush();
   assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();
 });
-
 test('the change log shows what changed, accepted and ignored feedback', async () => {
   const log = [{ kind: 'version', at: '', version_id: 'asset_v2', version: 2, from_version: 1, made_by: 'Claude', what_changed: 'Shorter headline',
     round: { reviewed_version: 1, decided_by: 'Shane', note: 'Keep the visual', accepted: [{ author: 'Teng', body: 'Shorter headline', at_sec: 3, source: 'slack', source_link: 'https://slack/p1' }], ignored: [{ author: 'Henry', body: 'Coral CTA', at_sec: null, source: 'app', source_link: null, reason: 'Off brief' }] } }];
@@ -583,49 +577,53 @@ test('frame labels report the real media frame, not the preset name', () => {
   assert.equal(frameLabel({ width: 1000, height: 700 }, 'square'), '1000×700', 'unknown ratios show the real size');
 });
 
-test('Higgsfield ads regenerate in Higgsfield only after an explicit paid-render confirmation', async () => {
+test('Higgsfield ads: Process feedback opens a paid-render confirmation on demand; only Render spends', async () => {
   const calls = []; const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => { calls.push([String(url), init?.body ? JSON.parse(init.body) : null]); return new Response(JSON.stringify(String(url).includes('usage') ? { seconds_this_month: 54, monthly_cap_seconds: 300 } : { processing_id: 'p', job_id: 'j', status: 'submitted' }), { status: 200 }); };
   const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({ rpc: async () => ({ error: null }) }) }, '@/lib/data': { fmtDate: () => '' } }).default;
   const hv = { ...v1, file_path: 'a.mp4', render: { state: 'ready' }, spec: { type: 'higgsfield', duration: 6, aspect_ratio: '3:4', audio: false, prompt: 'p' } };
   const cOk = { id: 'c1', status: 'open', decision: 'approved', body: 'Heavier rain' };
   await mount(() => React.createElement(Bar, { a: asset, vs: [hv], comments: [cOk], proc: null, reload: () => {}, toast: () => {}, onOpen: () => {} }));
-  assert.ok(!button('Regenerate ad'), 'no worker regenerate for a Higgsfield video');
-  await act(async () => button('Regenerate in Higgsfield').click()); await flush();
+  assert.equal(document.querySelector('[role="alertdialog"]'), null, 'no permanent confirmation panel');
+  assert.ok(!button('Regenerate in Higgsfield') && !button('Regenerate ad'));
+  await act(async () => button('Process feedback').click()); await flush();
   assert.equal(calls.filter(c => c[0].includes('revise')).length, 0, 'nothing paid on the first press');
-  assert.match(document.body.textContent, /Paid render: 6s · 3:4 · no sound · 54s used this month of 300/);
+  assert.match(document.querySelector('[role="alertdialog"]').textContent, /Paid Higgsfield render of v2.*1 included item · 6s · 3:4 · no sound · 54s used this month of 300/);
+  assert.equal(button('Process feedback').getAttribute('aria-expanded'), 'true');
+  await act(async () => button('Not now').click());
+  assert.equal(document.querySelector('[role="alertdialog"]'), null);
+  await act(async () => button('Process feedback').click()); await flush();
   await act(async () => button('Render v2').click()); await flush();
   const rev = calls.filter(c => c[0].includes('/api/higgsfield/revise'));
   assert.equal(rev.length, 1); assert.equal(rev[0][1].confirm, true); assert.equal(rev[0][1].asset_id, 'asset');
   globalThis.fetch = realFetch; await finish();
 });
-
 test('a Higgsfield regenerate in progress says so honestly, with no cancel and any unclear outcome shown', async () => {
   const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({}) }, '@/lib/data': { fmtDate: () => '' } }).default;
   const proc = { id: 'p', reviewed_version_id: 'asset_v1', comment_ids: ['c1'], status: 'executing', engine: 'higgsfield', rev: 1, message: 'Higgsfield’s answer was unclear, so it may be rendering.' };
   await mount(() => React.createElement(Bar, { a: asset, vs: [v1], comments: [], proc, reload: () => {}, toast: () => {}, onOpen: () => {} }));
-  assert.match(document.body.textContent, /Rendering v2 in Higgsfield/); assert.match(document.body.textContent, /frozen when you pressed Regenerate/);
+  assert.match(document.body.textContent, /Rendering v2 in Higgsfield/); assert.match(document.body.textContent, /1 item marked below/);
   assert.match(document.body.textContent, /answer was unclear/);
-  assert.ok(!button('Cancel') && !button('Regenerate in Higgsfield'));
+  assert.ok(!button('Cancel')); assert.equal(button('Process feedback').disabled, true);
   await finish();
 });
 
-test('an ad the worker can’t rebuild offers Continue in Claude instead of promising a result within the hour', async () => {
+test('an ad the worker can’t rebuild: Process feedback opens a manual Claude hand-off, never promising the hourly worker', async () => {
   const f = regenFixture(null, [cB], { engine: null }); await mount(f.Bar);
-  assert.ok(!button('Regenerate ad'), 'no worker button for a Claude Design ad');
-  assert.ok(button('Continue in Claude'));
-  const t = document.body.textContent;
-  assert.match(t, /made in Claude Design, which the hourly worker can’t rebuild/); assert.match(t, /only the approved items/);
+  assert.equal(document.querySelector('[role="dialog"]'), null, 'hand-off opens on demand only');
+  await act(async () => button('Process feedback').click());
+  const t = document.querySelector('[role="dialog"]').textContent;
+  assert.match(t, /Made in Claude Design/); assert.match(t, /hourly worker can’t rebuild/); assert.match(t, /only the 1 included item/); assert.match(t, /ad asset/);
   assert.doesNotMatch(t, /within the hour/);
+  assert.ok(button('Copy request'));
   assert.equal(f.calls.length, 0, 'nothing queued');
   await finish();
 });
-
 test('a run being made in someone’s Claude says who and since when; only they can cancel', async () => {
   const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'executing', engine: 'claude', claimed_by: 'teng', claimed_at: '2026-10-30T15:00:00Z', rev: 2 };
   let f = regenFixture(proc, [cA, cB]); await mount(f.Bar);
   assert.match(document.body.textContent, /Teng He is making v3 in Claude/); assert.ok(!button('Cancel'), 'an admin can’t cancel someone else’s claim from here');
-  assert.ok(!button('Regenerate ad') && !button('Continue in Claude'));
+  assert.equal(button('Process feedback').disabled, true, 'no concurrent run');
   await finish();
   f = regenFixture(proc, [cA, cB], { me: 'teng' }); await mount(f.Bar);
   assert.match(document.body.textContent, /You’re making v3 in Claude/);

@@ -122,9 +122,13 @@ function AssetDetail({ id }: { id: string }) {
             <span className="muted small">{rev ? `${rev.status === 'approved' ? 'Approved' : 'Changes requested'} by ${who(rev.reviewer)} · ${fmtDate(rev.at)}` : `v${v.version} by ${who(v.created_by, v.legacy_creator)} · ${fmtDate(v.created_at)}`}</span></div>
         </div>
 
-        <div className="actions">
+        {/* Row 1 decides: process feedback into the next version, approve or reject the ad. Row 2 moves it. */}
+        <div className="actions" role="group" aria-label="Decide">
+          {manage ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} me={member?.user_id} who={who} /> : null}
           {can(member, 'approver') ? <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} title={blockedApproval || 'Final approval: this version is ready to run'} onClick={() => review('approved')}>{rev?.status === 'approved' ? `v${v.version} approved` : `Approve v${v.version}`}</button> : null}
           {manage && !a.archived ? <button className="btn quiet-danger" disabled={busy} title="Moves it to Rejected and archived. You can restore it later." onClick={reject}>Reject ad</button> : null}
+        </div>
+        <div className="actions" role="group" aria-label="Share and download">
           <button className="btn" onClick={() => setShare(true)}>Share</button>
           {v.file_path ? <button className="btn" onClick={download}>Download</button> : null}
           {hasMore ? <details className="dd"><summary className="btn ghost icon" aria-label="More actions" title="More actions">•••</summary>
@@ -145,7 +149,7 @@ function AssetDetail({ id }: { id: string }) {
                 else { const pv = document.getElementById('pv') as HTMLVideoElement | null;
                   const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null }); if (error) throw error; }
                 setCmt(''); cmtBase.current = ''; cmtRec.clear(); comments.reload();
-                toast(manage ? 'Feedback added · approve it below' : `Feedback sent to ${ownerName}`);
+                toast(manage ? 'Feedback added · include it below' : `Feedback sent to ${ownerName}`);
               } catch (err: any) { toast('Not saved · ' + (err?.message || err)); } }}>
             <div className="sechead"><h2 id="gfH"><label htmlFor="cmt">Give feedback</label></h2><span className="muted small">on v{v.version}{isLatest ? ' (latest)' : ` · older version, latest is v${latest?.version}`}</span></div>
             <textarea id="cmt" rows={3} placeholder="Talk or type what should change" value={cmt} onChange={e => setCmt(e.target.value)} />
@@ -156,9 +160,8 @@ function AssetDetail({ id }: { id: string }) {
           </form> : <p className="hint">View-only access. Ask Shane for Creator to leave feedback.</p>}
         </section>
 
-        {(() => { const panel = manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} me={member?.user_id} who={who} /> : null;
-          return <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} latestVersion={latest?.version || 0} viewedVersionId={v.id} who={who} audioUrls={audioUrls} toast={toast}
-            reload={() => { comments.reload(); procs.reload(); }} regen={active ? null : panel} progress={active ? panel : null} />; })()}
+        <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} latestVersion={latest?.version || 0} who={who} audioUrls={audioUrls} toast={toast}
+          reload={() => { comments.reload(); procs.reload(); }} />
 
         <PreviousRuns viewedVersionId={v.id} comments={comments.rows} runs={procs.rows as any} shares={shares.rows} onOpen={selectVersion} vs={vs} manage={manage} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }} />
 

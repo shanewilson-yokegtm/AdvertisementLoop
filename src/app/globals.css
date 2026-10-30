@@ -260,3 +260,12 @@ tr:first-child th,tr:first-child td{border-top:0}
 .group h3, .hist h3 { font-size: 13px; font-weight: 600; margin: 0; color: var(--muted); }
 .hist { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--hair); }
 .hist:first-child { border-top: 0; padding-top: 0; }
+
+/* Top Process feedback action: on-demand confirm/hand-off popover and a compact status line */
+.proc{position:relative;display:inline-flex}
+.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:min(360px,calc(100vw - 32px));display:grid;gap:8px;padding:14px;border-radius:var(--R);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow)}
+.pop .mono{word-break:break-word}
+.procnote{order:9;flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}
+.procnote.err{color:var(--err, #b42318)}
+.incl{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;min-height:32px;cursor:pointer}
+.incl input{width:18px;height:18px;margin:0}

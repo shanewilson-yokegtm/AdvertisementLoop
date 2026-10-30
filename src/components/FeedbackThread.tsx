@@ -22,8 +22,8 @@ type Shared = {
   audioUrls: Record<string, string>; toast: (m: string) => void; reload: () => void;
 };
 
-/** One attributed feedback card. Owners/admins approve or reject open items (saved right away); approving an item
- *  only queues it for the next version. It is not final approval of the ad. */
+/** One attributed feedback card. Owners/admins tick Include (saved right away as an approved decision) to put an open
+ *  item into the next version, or reject it. This is separate from approving the ad itself. */
 function useCard({ vs, manage, who, audioUrls, toast, reload }: Shared, opts: { latestVersion: number; inFlight?: Set<string>; nextVersion?: number }) {
   const [busy, setBusy] = useState<string | null>(null);
   const vOf = (id?: string | null) => vs.find(x => x.id === id)?.version;
@@ -40,10 +40,10 @@ function useCard({ vs, manage, who, audioUrls, toast, reload }: Shared, opts: { 
     const ver = vOf(c.version_id);
     const older = isOpen && ver != null && ver < opts.latestVersion;
     const state = c.status === 'applied' ? <span className="chip ok">{vOf(c.applied_in) != null ? `Applied in v${vOf(c.applied_in)}` : 'Applied'}</span>
-      : flying ? <span className="chip live">Going into v{opts.nextVersion}</span>
+      : flying ? <span className="chip live">Processing into v{opts.nextVersion}</span>
       : c.status === 'dismissed' ? <span className="chip plain">Rejected</span>
-      : yes ? <span className="chip ok">Approved, not processed</span>
-      : <span className="chip warn">{manage ? 'Needs decision' : 'Waiting for owner'}</span>;
+      : manage ? null
+      : yes ? <span className="chip ok">Included by owner</span> : <span className="chip plain">Waiting for owner</span>;
     return <li key={c.id} className={'fb' + (yes ? ' sel' : '') + (isOpen ? '' : ' done') + (c.status === 'dismissed' ? ' off' : '')}>
       <div className="by"><b>{who(c.author, c.legacy_author)}</b>
         <span className="muted">v{ver ?? '?'}{c.at_sec != null ? ` · at ${fmtSec(c.at_sec)}` : ''} · {fmtDate(c.created_at)}{c.source === 'slack' ? ' · Slack' : ''}</span>
@@ -54,50 +54,34 @@ function useCard({ vs, manage, who, audioUrls, toast, reload }: Shared, opts: { 
       {c.deleted_at ? <div className="muted small">Deleted in Slack (kept for history)</div> : c.edited_at ? <div className="muted small">Edited in Slack</div> : null}
       <div className="ctl">
         <span className="row">{state}{c.source_link ? <a className="muted small" href={c.source_link} target="_blank" rel="noopener">View in Slack</a> : null}</span>
-        {manage && isOpen ? <div className="decide" role="group" aria-label={`Use ${who(c.author, c.legacy_author)}’s feedback in the next version?`}>
-          <button type="button" className="yes" aria-pressed={yes} disabled={!!busy} onClick={() => decide(c, yes ? 'undecided' : 'approved')}>Approve</button>
-          <button type="button" className="no" disabled={!!busy} onClick={() => decide(c, 'rejected')}>Reject</button>
-        </div> : null}
+        {manage && isOpen ? <span className="row">
+          <label className="incl"><input type="checkbox" checked={yes} disabled={!!busy} onChange={() => decide(c, yes ? 'undecided' : 'approved')}
+            aria-label={`Include ${who(c.author, c.legacy_author)}’s feedback in the next version`} /> Include</label>
+          <button type="button" className="linkish muted" disabled={!!busy} onClick={() => decide(c, 'rejected')}>Reject feedback</button>
+        </span> : null}
         {manage && c.status === 'dismissed' ? <button type="button" className="btn small ghost" disabled={!!busy} onClick={() => decide(c, 'undecided')}>Undo</button> : null}
       </div>
     </li>;
   };
 }
 
-/** Feedback still to process (every open item, from any version), then anything going into the version being made. */
-export default function FeedbackThread({ comments, inFlight, nextVersion, latestVersion, viewedVersionId, regen, progress, ...shared }: Shared & {
-  comments: Comment[]; inFlight: Set<string>; nextVersion: number; latestVersion: number; viewedVersionId?: string;
-  regen?: React.ReactNode; progress?: React.ReactNode;
+/** One running list: every open item from any version plus anything in the run being processed. */
+export default function FeedbackThread({ comments, inFlight, nextVersion, latestVersion, ...shared }: Shared & {
+  comments: Comment[]; inFlight: Set<string>; nextVersion: number; latestVersion: number;
 }) {
   const card = useCard(shared, { latestVersion, inFlight, nextVersion });
-  const live = comments.filter(c => !(c.deleted_at && c.status === 'open'));
-  const pending = live.filter(c => c.status === 'open' && !inFlight.has(c.id));
-  // The version being viewed comes first; open items from other versions stay counted and decidable in a closed group.
-  const here = viewedVersionId ? pending.filter(c => c.version_id === viewedVersionId) : pending;
-  const other = viewedVersionId ? pending.filter(c => c.version_id !== viewedVersionId) : [];
-  const needs = here.filter(c => c.decision !== 'approved'), waiting = here.filter(c => c.decision === 'approved');
-  const viewedN = shared.vs.find(v => v.id === viewedVersionId)?.version ?? latestVersion;
-  const allOlder = other.every(c => (shared.vs.find(v => v.id === c.version_id)?.version ?? 0) < viewedN);
-  const otherApproved = other.filter(c => c.decision === 'approved').length;
-  const going = live.filter(c => c.status === 'open' && inFlight.has(c.id));
-  return <>
-    <section className="section" aria-labelledby="fpH">
-      <div className="sechead"><h2 id="fpH">Feedback to process</h2><span className="muted small">{pending.length ? `${pending.length} open` : ''}</span></div>
-      {!pending.length ? <p className="hint">{live.length ? 'Nothing waiting. Earlier feedback is under Previous runs and versions.' : 'No feedback yet.'}</p>
-        : <p className="hint">{shared.manage ? 'Approve what should change, reject the rest, then regenerate. This is separate from approving the ad.' : 'The owner decides which feedback goes into the next version.'}</p>}
-      {needs.length ? <div className="group"><h3>{shared.manage ? 'Needs decision' : 'Waiting for the owner'} · {needs.length}</h3><ul className="thread" role="list" style={list}>{needs.map(card)}</ul></div> : null}
-      {waiting.length ? <div className="group"><h3>Approved, not processed yet · {waiting.length}</h3><ul className="thread" role="list" style={list}>{waiting.map(card)}</ul></div> : null}
-      {other.length ? <details className="disc group" id="earlier">
-        <summary>{allOlder ? 'Earlier feedback' : 'Feedback on other versions'} · still unprocessed<span className="muted">{other.length}{otherApproved ? ` · ${otherApproved} approved` : ''}</span></summary>
-        <div className="inner"><ul className="thread" role="list" style={list}>{[...other].reverse().map(card)}</ul></div></details> : null}
-      {regen}
-    </section>
-    {progress || going.length ? <section className="section" aria-labelledby="ipH">
-      <div className="sechead"><h2 id="ipH">In progress</h2>{going.length ? <span className="muted small">{going.length} item{going.length === 1 ? '' : 's'}</span> : null}</div>
-      {progress}
-      {going.length ? <ul className="thread" role="list" style={list}>{going.map(card)}</ul> : null}
-    </section> : null}
-  </>;
+  const items = comments.filter(c => c.status === 'open' && !c.deleted_at);
+  const going = items.filter(c => inFlight.has(c.id));
+  const pending = items.filter(c => !inFlight.has(c.id));
+  const incl = pending.filter(c => c.decision === 'approved').length;
+  // In-progress items first, then newest first.
+  const rows = [...going, ...[...pending].reverse()];
+  return <section className="section" aria-labelledby="fpH">
+    <div className="sechead"><h2 id="fpH">Feedback to process</h2>
+      <span className="muted small">{pending.length ? `${pending.length} open${incl ? ` · ${incl} included` : ''}` : ''}{going.length ? `${pending.length ? ' · ' : ''}${going.length} processing` : ''}</span></div>
+    {rows.length ? <ul className="thread" role="list" style={list}>{rows.map(card)}</ul>
+      : <p className="hint">{comments.length ? 'Nothing open. Earlier feedback is under Previous runs and versions.' : 'No feedback yet.'}</p>}
+  </section>;
 }
 
 type Run = { id: string; status: string; engine?: string; reviewed_version_id: string; result_version_id: string | null; comment_ids: string[];
