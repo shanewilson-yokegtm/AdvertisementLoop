@@ -60,6 +60,11 @@ export async function handle(db: SupabaseClient, a: Actor, method: string, parts
   const link = (asset: string, version?: string) => `${appUrl}/a/${asset}${version ? `?v=${version}` : ''}`;
   if (!atLeast(a, 'viewer')) throw new ApiError(403, 'forbidden', 'Not a member');
 
+  if (r0 === 'campaigns') {
+    const { handleCampaign } = await import('./campaign-api');
+    return handleCampaign(db, a, method, parts.slice(1), body, query);
+  }
+
   if (method === 'GET' && r0 === 'me') return { user_id: a.user_id, email: a.email, display_name: a.display_name, role: a.role };
 
   // Higgsfield (Seedance 2.5) for Claude via a personal token: same code, limits and idempotency as the in-app button.

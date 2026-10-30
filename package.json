@@ -9,7 +9,10 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "node supabase/tests/skill.e2e.mjs",
-    "test": "node supabase/tests/schema.test.mjs && node supabase/tests/ownership.test.mjs && node supabase/tests/api.test.mjs && node supabase/tests/slack.test.mjs && node supabase/tests/higgsfield.test.mjs && node supabase/tests/mcp.test.mjs && node --test supabase/tests/rollout.test.mjs"
+    "test": "node supabase/tests/schema.test.mjs && node supabase/tests/ownership.test.mjs && node supabase/tests/api.test.mjs && node supabase/tests/slack.test.mjs && node supabase/tests/higgsfield.test.mjs && node supabase/tests/mcp.test.mjs && node --test supabase/tests/rollout.test.mjs",
+    "test:campaigns": "node --test tests/campaigns/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "package:campaign-skill": "python3 scripts/package-campaign-skill.py"
   },
   "dependencies": {
     "@higgsfield/client": "^0.2.6",
@@ -19,7 +22,8 @@
     "jose": "^6.2.14",
     "next": "16.4.2",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

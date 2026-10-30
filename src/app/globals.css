@@ -6,6 +6,11 @@
   --shadow:0 1px 2px rgba(17,19,23,.04),0 4px 16px rgba(17,19,23,.06); --pop:0 8px 30px rgba(17,19,23,.16);
   --font:"Instrument Sans",Inter,Arial,sans-serif; --r:10px; --R:16px; color-scheme:light;
 }
+.campaign-memo{padding:20px;margin:16px 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);max-width:920px}
+.campaign-memo pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.campaign-table{overflow-x:auto;margin:20px 0}
+.campaign-table table{border-collapse:collapse;width:100%;text-align:left}
+.campaign-table th,.campaign-table td{padding:12px;border-bottom:1px solid var(--border);white-space:nowrap}
 @media (prefers-color-scheme: dark){:root{
   --bg:#111317; --surface:#1B1E24; --subtle:#24272E; --text:#F7F4EC; --muted:#BDBAB2; --border:#3C4048; --hair:#2E3138;
   --action:#F7F4EC; --action-text:#111317; --link:#A7D8FF; --focus:#A7D8FF;
