@@ -51,9 +51,11 @@ export function pgClient(db) {
     try {
       const named = Object.entries(args).map(([k, v]) => `${k} => ${v === null || v === undefined ? 'null' : Array.isArray(v) || typeof v === 'object' ? q(v) : q(v)}`).join(', ');
       const r = await db.query(`select * from public.${fn}(${named})`);
-      const ret = (await db.query(`select t.typname from pg_proc p join pg_type t on t.oid = p.prorettype where p.proname = '${fn}' limit 1`)).rows[0]?.typname;
+      const { typname: ret, typtype } = (await db.query(`select t.typname, t.typtype from pg_proc p join pg_type t on t.oid = p.prorettype where p.proname = '${fn}' limit 1`)).rows[0] || {};
       const setof = (await db.query(`select proretset from pg_proc where proname = '${fn}' limit 1`)).rows[0]?.proretset;
-      return { data: setof ? r.rows : (ret === 'void' ? null : r.rows[0]), error: null };
+      // Like PostgREST/supabase-js: a scalar (base type) function returns the bare value, a row type returns the row.
+      const one = r.rows[0]; const scalar = typtype === 'b' && ret !== 'void' && one ? Object.values(one)[0] : one;
+      return { data: setof ? r.rows : (ret === 'void' ? null : scalar), error: null };
     } catch (e) { return { data: null, error: { message: String(e.message), code: e.code } }; }
   };
   return {

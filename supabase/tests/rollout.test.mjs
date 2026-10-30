@@ -421,3 +421,66 @@ test('account menu holds role, Connect Claude and Sign out; Escape closes it', a
   assert.equal(document.querySelector('.menu'), null);
   await finish();
 });
+
+// ---------- Claude connector consent + sign-in that keeps authorization_id ----------
+function consentFixture(details, known = ['claude-connector']) {
+  const calls = []; let assigned = null;
+  const { Consent } = source('src/components/Consent.tsx', {
+    '@/lib/supabase/browser': { sb: () => ({ auth: { oauth: {
+      getAuthorizationDetails: async id => { calls.push(['details', id]); return { data: details, error: null }; },
+      approveAuthorization: async (id, o) => { calls.push(['approve', id, o]); return { data: { redirect_url: 'https://claude.ai/api/mcp/auth_callback?code=c&state=s' }, error: null }; },
+      denyAuthorization: async (id, o) => { calls.push(['deny', id, o]); return { data: { redirect_url: 'https://claude.ai/api/mcp/auth_callback?error=access_denied' }, error: null }; },
+    } } }) },
+    '@/components/Shell': { useApp: () => ({ member: { user_id: 'teng', display_name: 'Teng He', role: 'creator' } }), roleLabel: r => r },
+  });
+  return { Comp: () => React.createElement(Consent, { authorizationId: 'auth-123', known, go: u => { assigned = u; } }), calls, assigned: () => assigned };
+}
+const det = cid => ({ authorization_id: 'auth-123', redirect_uri: 'https://claude.ai/api/mcp/auth_callback', scope: 'openid email', client: { id: cid, name: 'Claude', uri: 'https://claude.ai', logo_uri: '' }, user: { id: 'teng', email: 'teng@yokegtm.com' } });
+
+test('consent: the registered connector shows what it can do as you, and Allow approves this request only', async () => {
+  const f = consentFixture(det('claude-connector')); await mount(f.Comp); await flush();
+  const t = document.body.textContent;
+  assert.match(t, /Connect Claude to Ad Studio\?/); assert.match(t, /claude\.ai/); assert.match(t, /Teng He/);
+  assert.match(t, /Paid Higgsfield video and Slack posts still ask you/);
+  await act(async () => button('Allow').click()); await flush();
+  assert.deepEqual(f.calls.map(c => c.slice(0, 2)), [['details', 'auth-123'], ['approve', 'auth-123']]);
+  assert.equal(f.calls[1][2].skipBrowserRedirect, true);
+  assert.match(f.assigned(), /^https:\/\/claude\.ai\/api\/mcp\/auth_callback\?code=/);
+  await finish();
+});
+
+test('consent: an unknown OAuth client can only be denied', async () => {
+  const f = consentFixture(det('rogue-client')); await mount(f.Comp); await flush();
+  assert.match(document.body.textContent, /isn’t the Ad Studio Claude connector/);
+  assert.ok(!button('Allow'), 'no Allow for unregistered clients');
+  await act(async () => button('Deny').click()); await flush();
+  assert.deepEqual(f.calls.map(c => c[0]), ['details', 'deny']);
+  await finish();
+});
+
+test('consent: an already-approved request returns to Claude without asking again', async () => {
+  const f = consentFixture({ redirect_url: 'https://claude.ai/api/mcp/auth_callback?code=again' }); await mount(f.Comp); await flush();
+  assert.equal(f.assigned(), 'https://claude.ai/api/mcp/auth_callback?code=again');
+  assert.equal(f.calls.length, 1);
+  await finish();
+});
+
+test('sign-in keeps the full consent URL, query included', () => {
+  const { loginRedirect } = source('src/lib/login-redirect.ts');
+  const u = loginRedirect(new URL('https://studio.example/oauth/consent?authorization_id=abc-123&x=1'));
+  assert.equal(u.pathname, '/login');
+  assert.equal(u.searchParams.get('next'), '/oauth/consent?authorization_id=abc-123&x=1');
+  assert.equal(loginRedirect(new URL('https://studio.example/')).search, '');
+});
+
+test('magic-link callback returns only to same-origin paths, query kept', async () => {
+  const redirects = [];
+  const mod = source('src/app/auth/callback/route.ts', {
+    'next/server': { NextResponse: { redirect: u => { redirects.push(String(u)); return { status: 307 }; } } },
+    '@/lib/supabase/server': { userClient: async () => ({ auth: { exchangeCodeForSession: async () => ({ error: null }) } }) },
+  });
+  for (const next of ['/oauth/consent?authorization_id=abc', '//evil.example/x', '/\\evil.example/x', 'https://evil.example', '/%0d%0aLocation:x']) {
+    await mod.GET({ url: 'https://studio.example/auth/callback?code=c&next=' + encodeURIComponent(next) });
+  }
+  assert.deepEqual(redirects, ['https://studio.example/oauth/consent?authorization_id=abc', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/%0d%0aLocation:x']);
+});
