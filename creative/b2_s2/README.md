@@ -11,3 +11,6 @@ bottom copy cut to 7 words.
 
 v3 (revision job a7389ada, review cf18fa10): headline "You connected on LinkedIn. They accepted. Now what?" (dropped "Incredible teamwork."),
 bottom line "Yoke follows up for you, automatically."
+
+v4 (revision job 04df0d7a, review 54701526): headline on three lines ("You connected on LinkedIn." / "They accepted." /
+"Now what?"), bottom line "Yoke follows up for you, automatically." bigger (52px -> 66px).
