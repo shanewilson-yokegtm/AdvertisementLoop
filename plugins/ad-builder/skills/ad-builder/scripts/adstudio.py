@@ -14,6 +14,7 @@ yas_... token from Ad Studio > Connect Claude) from the environment. Never print
   adstudio.py higgsfield --prompt P [--seconds 4-12] [--format vertical|feed45|square|landscape] [--no-sound]
                          [--asset ASSET_ID | --name N] [--key KEY] [--wait SECONDS]   # ONE billable Seedance 2.5 render
   adstudio.py hf-status JOB_ID                   # check a render once (finishes the version when ready)
+  adstudio.py hf-revise ASSET_ID --person-confirmed [--note T]   # ONE billable regenerate from approved feedback (owner/admin)
   adstudio.py save-pending ASSET_ID --note "Higgsfield render pending: ..." [--meta JSON] [--key KEY]
   adstudio.py comment ASSET_ID --version VERSION_ID --text T [--at SECONDS]
   adstudio.py process ASSET_ID                   # start or resume the shared review (no edits)
@@ -122,6 +123,7 @@ def main():
     x.add_argument('--format', default='vertical', choices=['vertical', 'feed45', 'square', 'landscape']); x.add_argument('--no-sound', action='store_true')
     x.add_argument('--asset'); x.add_argument('--name'); x.add_argument('--key'); x.add_argument('--wait', type=int, default=600)
     x = sp.add_parser('hf-status'); x.add_argument('job')
+    x = sp.add_parser('hf-revise'); x.add_argument('asset'); x.add_argument('--note'); x.add_argument('--person-confirmed', action='store_true')
     x = sp.add_parser('save-pending'); x.add_argument('asset'); x.add_argument('--note', required=True); x.add_argument('--meta', default='{}'); x.add_argument('--key')
     x = sp.add_parser('comment'); x.add_argument('asset'); x.add_argument('--version', required=True); x.add_argument('--text', required=True); x.add_argument('--at', type=float)
     x = sp.add_parser('decide'); x.add_argument('asset'); x.add_argument('feedback'); x.add_argument('decision', choices=['approved', 'rejected', 'undecided']); x.add_argument('--reason')
@@ -159,6 +161,9 @@ def main():
         r = api('POST', f'assets/{a.asset}/versions', {**json.loads(a.meta), 'render_state': 'pending', 'render_note': a.note, 'idempotency_key': a.key or f'pending-{uuid.uuid4()}'})
     elif a.cmd == 'comment': r = api('POST', f'assets/{a.asset}/comments', {'version_id': a.version, 'body': a.text, 'at_sec': a.at})
     elif a.cmd == 'hf-usage': r = api('GET', 'higgsfield/usage')
+    elif a.cmd == 'hf-revise':
+        if not a.person_confirmed: fail('not_confirmed', 'Regenerating in Higgsfield is paid. Ask the person, then pass --person-confirmed.')
+        r = api('POST', 'higgsfield/revise', {'asset_id': a.asset, 'note': a.note, 'person_confirmed': True})
     elif a.cmd == 'hf-status': r = api('GET', f'higgsfield/status?job={a.job}')
     elif a.cmd == 'higgsfield':
         # Never retried: the idempotency key makes a repeat return the first render instead of paying twice.

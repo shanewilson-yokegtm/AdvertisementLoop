@@ -45,7 +45,7 @@ def main():
     shutil.copytree(ALIAS, PLUGIN / 'skills/ad-builder', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
     manifest_path = PLUGIN / '.claude-plugin/plugin.json'
     manifest = json.loads(manifest_path.read_text())
-    manifest['version'] = '0.3.0'
+    manifest['version'] = '0.4.0'
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
     archive(PLUGIN, ROOT / 'plugins/ad-builder-plugin.zip', PLUGIN)
 
@@ -53,7 +53,7 @@ def main():
         assert built.testzip() is None
         for required in ('SKILL.md', 'scripts/adstudio.py', 'references/yoke-brand.md', 'assets/yoke-lockup.svg'):
             assert 'ad-builder/' + required in built.namelist(), required
-    print('Built self-contained ad-builder, compatibility yoke-ad-maker, and plugin 0.3.0.')
+    print('Built self-contained ad-builder, compatibility yoke-ad-maker, and plugin 0.4.0.')
 
 
 if __name__ == '__main__':

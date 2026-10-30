@@ -11,16 +11,20 @@ For a new ad, use a concept and format already supplied. Otherwise offer Static,
 
 ## What's connected
 
-This skill talks to Ad Studio through its bundled `scripts/adstudio.py`. Resolve this skill's installed folder and use the helper's absolute path; another skill's working directory will not contain this script. It uses this connection configuration in the Claude you're using:
+**Preferred: the Yoke Ad Studio connector.** If this Claude has the connector's tools (`whoami`, `get_ad`, `save_version`, `higgsfield_generate`, ...), use them. Call `whoami` first. The connector signs in as the person through Ad Studio (their own account and role), so there is no token to handle. If the tools are missing, say so and point the person to Ad Studio > **Connect Claude**, which has the setup steps. Never ask for a token or key in chat.
+
+**Advanced fallback: the bundled helper** (Claude Code and other tools that keep secrets in their own environment). Resolve this skill's installed folder and use `scripts/adstudio.py` by absolute path.
 
 - `AD_STUDIO_API` defaults to `https://advertisementloop-eight.vercel.app/api/v1`; override it only for an explicitly selected environment.
-- `AD_STUDIO_TOKEN` = your personal token from Ad Studio > **Connect Claude**. It acts as you, with your permissions, and nothing more.
+- `AD_STUDIO_TOKEN` = a personal token from Ad Studio > Connect Claude > Advanced, set in that tool's secret settings.
 
-Run `python3 scripts/adstudio.py me` first. Outcomes:
+Run `python3 scripts/adstudio.py me` first:
 
 - It prints your name: connected.
-- `not_configured`: no personal connection here. Explain that the server's Vercel/Supabase/Higgsfield keys do not authenticate this Claude conversation. Use a supported secure environment setup; never ask for a token in chat or invent a Claude setting for environment variables. Offer the app fallback if this client has no secure setup mechanism.
-- `api_not_enabled`, `network` or `upload_blocked`: the service or this environment can't reach Ad Studio. Keep making the creative work, then build a handoff bundle (`adstudio.py handoff`) for manual upload in the app. Say exactly what wasn't saved.
+- `not_configured`: no connection here. The server's Vercel/Supabase/Higgsfield keys never authenticate a Claude conversation. Point to Connect Claude; never invent a setting.
+- `api_not_enabled`, `network` or `upload_blocked`: this environment can't reach Ad Studio. Keep making the work, then build a handoff bundle (below). Say exactly what wasn't saved.
+
+Helper commands map one-to-one to connector tools (`get` = `get_ad`, `decide` = `decide_feedback`, `process-approved` = `regenerate_ad`, `share` = `post_to_slack`, `higgsfield` = `higgsfield_generate`, `hf-revise` = `higgsfield_regenerate`).
 
 Every save, share and feedback result must come from the script's output. If it didn't return an id or link, it didn't happen. Don't invent ids, links or tool names. The real shared library is the Vercel app above: never write to or return a legacy `claude.ai/artifact` library as a fallback.
 
@@ -53,10 +57,12 @@ Each render is billable. Ad Studio holds the Higgsfield key; you never see or ne
 
 1. Write the prompt: one scene, the habit and the joke shown visually, no on-screen text or logo (Seedance can't spell; add the Yoke end card later as a separate version if needed). Pick the length (4-12 s, default 9), format (default `vertical`) and sound (default on).
 2. Run `python3 scripts/adstudio.py hf-usage`, then **confirm before rendering**. Ask in one line, e.g. `Render 9 s vertical with sound? This month: 54 s used of 300.` Render only after a yes. A yes covers that one render.
-3. `python3 scripts/adstudio.py higgsfield --prompt "<prompt>" --seconds 9 --format vertical --name "<concept>"` (or `--asset <id>` to add a version to an existing ad). It submits once, then waits up to 10 min for the render.
+3. Connector: `higgsfield_generate` with `person_confirmed: true` only after that yes. Helper: `python3 scripts/adstudio.py higgsfield --prompt "<prompt>" --seconds 9 --format vertical --name "<concept>"` (or `--asset <id>` to add a version to an existing ad; it keeps that ad's frame). It submits once, then waits up to 10 min for the render.
    - **Never re-run to "retry".** Same arguments return the same render instead of paying twice. A new attempt with a changed prompt is a new render: confirm again.
    - `completed`: the video is saved as a version. Report its `link`.
    - `failed`, `nsfw` or `error`: report the reason. Offer a reworded prompt, and confirm before rendering it.
+   - `unknown_outcome` / `timeout_unknown_outcome`: Higgsfield may have accepted it and charged. Don't retry. Give the generation id and ask Shane to check the Higgsfield dashboard.
+   - The feed preset renders 3:4 (closest to 4:5) and landscape renders 16:9. Report the frame the file really has.
    - Still rendering after the wait: give the `link` and `hf-status <job_id>`; the server finishes the version when it's ready.
 4. `higgsfield_not_connected`: the server key is missing. Tell Shane. Don't fall back to the connector or another provider.
 5. No Ad Studio token: save nothing, give the prompt as a brief, and point the person to the app's Create → Higgsfield video.
@@ -73,11 +79,11 @@ python3 scripts/adstudio.py save <asset_id> --file final.mp4 --poster poster.jpg
 - **Revisions:** pass `--parent <exact parent version id>`. If someone saved a newer version first, the save is refused (`conflict`). Show the person, and don't overwrite.
 - **After saving:** report the returned version id and its `link`. Saving is not approval.
 
-No connection? `python3 scripts/adstudio.py handoff ./handoff --title ... --format ... --files final.png source.svg --meta '{...}'` writes `handoff.zip` with `handoff.json`. Unknown ids stay null. Tell the person to upload it in the app.
+No connection? `python3 scripts/adstudio.py handoff ./handoff --title ... --format ... --files final.png source.svg --meta '{...}'` writes `handoff.zip` with `handoff.json`. Unknown ids stay null. The app's **Upload** takes the rendered media file (and an optional source link); it does not import the zip or its editable source. Tell the person to upload the final file there and keep `handoff.zip` with the source until a connected Claude can save it.
 
 ## Share to Slack
 
-Only the owner (or an admin) shares. A question is optional.
+Only the owner (or an admin) shares. A question is optional. Posting is visible to the channel: name the channel and get a yes first (connector: `post_to_slack` with `person_confirmed: true`).
 
 ```
 python3 scripts/adstudio.py channels                      # channels the Yoke app is in
@@ -99,7 +105,8 @@ item on the ad (from any version, whenever it arrived) into the next version. Un
 2. `get <asset_id>` shows every feedback item (author, time, version, timecode, Slack link, `decision`) and the latest version.
 3. Summarize the open items and suggest which to approve. Wait for the person to choose; "approve Teng's, reject Henry's" is enough.
 4. Record each choice: `decide <asset_id> <feedback_id> approved|rejected|undecided [--reason "..."]` (same as the app's Approve / Reject).
-5. `process-approved <asset_id> [--note "anything else"]` queues the next version with all approved items (same as the app's **Process approved feedback**). The revision worker makes it within the hour.
+5. `regenerate_ad` / `process-approved <asset_id> [--note "anything else"]` queues the next version with all approved items, frozen at that moment (same as the app's **Regenerate ad**). The revision worker picks it up on its next run; report it as queued, not done.
+   For a Higgsfield video, regenerating is a paid render: show the approved items, length, frame and this month's usage, get a yes, then `higgsfield_regenerate` (`person_confirmed: true`) or `hf-revise <asset_id> --person-confirmed`. It keeps the parent's length, frame and sound. Feedback is marked applied only after the new video is saved; a failed render leaves it approved.
 6. If you're making the version yourself instead: `get` shows the new review id and its `rev`. Make the change, then
    `save <asset_id> --file ... --parent <latest_version_id> --review <review_id> --note "<what changed, item by item>"` and
    `complete <review_id> --rev N --version <new_version_id>`. Every approved item must be addressed in the new version.
@@ -111,7 +118,7 @@ If the helper reports `timeout_unknown_outcome`, the step may have gone through:
 
 Revert: `revert <asset_id> --from <old_version_id> --latest <current_latest_id>` makes a new version from the old one. History stays.
 
-In the app the same flow is Approve / Reject on each item, then **Process approved feedback**.
+In the app the same flow is Approve / Reject on each item, then **Regenerate ad** (or **Regenerate in Higgsfield** for Higgsfield videos).
 
 ## Wrapping up
 

@@ -32,7 +32,7 @@ No row: stop with "No revision jobs." `:session_url` is this session's `https://
 For a review job, mark the review as executing, acting as its processor:
 
 ```sql
-select rev, processor, reviewed_version_id, decisions, instructions, comment_ids from public.processing where id = :processing_id;
+select rev, processor, reviewed_version_id, decisions, instructions, comment_ids, feedback_snapshot, engine from public.processing where id = :processing_id;
 select public.processing_set_status(:processing_id, :rev, 'executing', 'Claude worker started', :processor);
 ```
 
@@ -40,9 +40,15 @@ select public.processing_set_status(:processing_id, :rev, 'executing', 'Claude w
 
 ```sql
 select a.*, v.* from public.assets a join public.versions v on v.asset_id = a.id where v.id = :reviewed_version_id;
-select c.id, c.body, c.at_sec, c.audio_path, m.display_name, c.created_at from public.comments c
-  left join public.members m on m.user_id = c.author where c.id = any(:comment_ids);
+-- The approved feedback, frozen when the owner pressed Regenerate. Use THIS text, not the live comments:
+-- a Slack edit after approval must not change what the owner approved.
+select x->>'comment_id' as id, x->>'body' as body, (x->>'at_sec')::numeric as at_sec, x->>'audio_path' as audio_path,
+       x->>'author_name' as display_name, x->>'created_at' as created_at
+  from jsonb_array_elements(:feedback_snapshot) x;
 ```
+
+Jobs from before Oct 30 have an empty `feedback_snapshot`; only then read `public.comments` by `comment_ids`.
+Rows with `engine = 'higgsfield'` are never worker jobs: the app renders them in Higgsfield itself. Skip them.
 
 **Review job:** address EVERY item in `comment_ids` (all are approved) plus `instructions`. Missing one is a failure:
 before saving, check the new render against each item, one by one. Where approved items conflict, the newest item wins
