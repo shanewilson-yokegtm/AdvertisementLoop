@@ -309,3 +309,32 @@ test('Higgsfield form: 9 s default, 4-12 s, 720p, sound toggle, one request per 
   assert.deepEqual(pushed, ['/a/ast_x?v=ast_x_v1']);
   globalThis.fetch = realFetch; await finish();
 });
+
+test('Library shows one card per concept; approved concepts download every format', async () => {
+  const mk = (id, name, format, status, archived = false) => ({ a: { id, concept_name: name, kind: 'motion', format, archived, owner_id: 'shane' }, v: { id: id + '_v2', asset_id: id, version: 2, file_path: id + '/v2.mp4', poster_path: null, content_type: 'video/mp4', created_at: '2026-10-29T10:00:00Z' }, status });
+  const list = [mk('a1', 'Clay: Credit math', 'feed45', 'approved'), mk('a2', 'Clay: Credit math ', 'vertical', 'approved'),
+    mk('b1', 'Clay: What did it do?', 'vertical', 'changes'), mk('b2', 'Clay: What did it do?', 'feed45', null), mk('c1', 'Old one', 'square', null, true)];
+  const rows = { assets: list.map(x => x.a), versions: list.map(x => x.v), reviews: list.filter(x => x.status).map(x => ({ version_id: x.v.id, status: x.status })), comments: [] };
+  const signedFor = [];
+  const Page = source('src/app/page.tsx', {
+    'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
+    '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useInbox: () => ({ rows: [] }), can: () => true,
+      FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {} },
+    '@/lib/supabase/browser': { sb: () => ({ storage: { from: () => ({ createSignedUrl: async (p, _s, o) => { signedFor.push([p, o.download]); return { data: { signedUrl: 'about:blank#' + p } }; } }) } }) },
+    '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
+    '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: s => React.createElement('span', null, s), renderChip: () => null },
+  }).default;
+  await mount(Page);
+  const titles = () => [...document.querySelectorAll('.grid:not(details .grid) .card .t')].map(e => e.textContent);
+  assert.deepEqual(titles().sort(), ['Clay: Credit math', 'Clay: What did it do?'], 'two concepts, not four format cards');
+  assert.deepEqual([...document.querySelectorAll('.card')][0].querySelector('a').getAttribute('href').startsWith('/a/'), true);
+  const fmts = t => [...[...document.querySelectorAll('.card')].find(c => c.querySelector('.t').textContent === t).querySelectorAll('[aria-label="Formats"] a')].map(e => e.textContent);
+  assert.deepEqual(fmts('Clay: Credit math'), ['9:16', '4:5'], '9:16 listed first');
+  assert.ok(button('Approved · 1') && button('Changes requested · 1') && button('All · 2'));
+  await act(async () => button('Approved · 1').click());
+  assert.deepEqual(titles(), ['Clay: Credit math']);
+  await act(async () => { button('Download all').click(); await new Promise(r => setTimeout(r, 1000)); });
+  assert.deepEqual(signedFor.map(x => x[0]), ['a2/v2.mp4', 'a1/v2.mp4']);
+  assert.match(signedFor[0][1], /Clay Credit math 9x16\.mp4/);
+  await finish();
+});
