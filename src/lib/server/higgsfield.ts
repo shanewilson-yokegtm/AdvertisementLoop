@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError, atLeast, dbError, requireManage, type Actor } from './api';
 
@@ -37,7 +37,13 @@ export async function generate(db: SupabaseClient, a: Actor, input: GenerateInpu
 
   // Same press again (lost response, double click): return the first result, never submit twice.
   const prev = ok(await db.from('higgsfield_jobs').select('*').eq('idempotency_key', key).maybeSingle()) as any;
-  if (prev) return { job: prev, asset_id: prev.asset_id, version_id: prev.version_id, repeated: true };
+  if (prev) {
+    await requireManage(db, a, prev.asset_id);
+    if ((input.asset_id && input.asset_id !== prev.asset_id) || prev.prompt !== prompt || prev.duration !== duration
+      || prev.aspect_ratio !== FORMAT_RATIO[format] || prev.audio !== !!input.audio)
+      throw new ApiError(409, 'conflict', 'This request key was already used for different generation settings.');
+    return { job: prev, asset_id: prev.asset_id, version_id: prev.version_id, repeated: true };
+  }
 
   const u = await usage(db);
   if (u.monthly_cap_seconds && u.seconds_this_month + duration > u.monthly_cap_seconds)
@@ -67,14 +73,15 @@ export async function generate(db: SupabaseClient, a: Actor, input: GenerateInpu
   let res: Response, body: any = {};
   try {
     res = await fetcher(`${HF_BASE}/${HF_MODEL}?hf_webhook=${encodeURIComponent(hook)}`, {
-      method: 'POST', headers: auth(creds), signal: AbortSignal.timeout(30_000),
+      method: 'POST', headers: { ...auth(creds), 'Idempotency-Key': job.id }, signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({ prompt, duration, resolution: '720p', aspect_ratio: FORMAT_RATIO[format], generate_audio: !!input.audio }),
     });
     body = await res.json().catch(() => ({}));
   } catch (e: any) {
     // We don't know whether Higgsfield accepted it. Don't resubmit; leave it for a person to check.
-    await fail(db, job, v.id, 'error', 'Higgsfield did not answer. It may still be rendering; check the Higgsfield dashboard before trying again.');
-    throw new ApiError(504, 'timeout_unknown_outcome', 'Higgsfield did not answer in time. Not retried, to avoid paying twice.');
+    // Keep the reservation and rendering state: an accepted request may still cost credits.
+    ok(await db.from('higgsfield_jobs').update({ error: 'Submission outcome unknown. Check the Higgsfield dashboard before generating again.' }).eq('id', job.id));
+    throw new ApiError(504, 'timeout_unknown_outcome', `Higgsfield did not answer in time. Not retried, to avoid paying twice. Check generation ${job.id} before starting another.`);
   }
   if (!res.ok || !body?.request_id) {
     const msg = res.status === 402 || /credit/i.test(JSON.stringify(body)) ? 'Not enough Higgsfield credits.' : `Higgsfield refused the request (${res.status}).`;
@@ -102,15 +109,17 @@ export function mp4Info(buf: Uint8Array): { duration: number | null; width: numb
     let p = start;
     while (p + 8 <= end) {
       let size = dv.getUint32(p); const type = String.fromCharCode(buf[p + 4], buf[p + 5], buf[p + 6], buf[p + 7]); let hdr = 8;
-      if (size === 1) { size = Number(dv.getBigUint64(p + 8)); hdr = 16; } else if (size === 0) size = end - p;
+      if (size === 1) { if (p + 16 > end) return; size = Number(dv.getBigUint64(p + 8)); hdr = 16; } else if (size === 0) size = end - p;
       if (size < hdr || p + size > end) return;
       const b = p + hdr;
       if (['moov', 'trak'].includes(type)) walk(b, p + size);
       else if (type === 'mvhd') {
-        const v1 = buf[b] === 1; const ts = dv.getUint32(b + (v1 ? 20 : 12)); const d = v1 ? Number(dv.getBigUint64(b + 24)) : dv.getUint32(b + 16);
+        const v1 = buf[b] === 1; if (b + (v1 ? 32 : 20) > p + size) return;
+        const ts = dv.getUint32(b + (v1 ? 20 : 12)); const d = v1 ? Number(dv.getBigUint64(b + 24)) : dv.getUint32(b + 16);
         if (ts) out.duration = Math.round((d / ts) * 1000) / 1000;
       } else if (type === 'tkhd' && out.width == null) {
-        const off = b + (buf[b] === 1 ? 88 : 76); const w = dv.getUint32(off) / 65536, h = dv.getUint32(off + 4) / 65536;
+        const off = b + (buf[b] === 1 ? 88 : 76); if (off + 8 > p + size) return;
+        const w = dv.getUint32(off) / 65536, h = dv.getUint32(off + 4) / 65536;
         if (w && h) { out.width = Math.round(w); out.height = Math.round(h); }
       }
       p += size;
@@ -124,7 +133,13 @@ export function mp4Info(buf: Uint8Array): { duration: number | null; width: numb
 export async function refresh(db: SupabaseClient, jobId: string, creds: string, fetcher: Fetch = fetch) {
   const job = ok(await db.from('higgsfield_jobs').select('*').eq('id', jobId).maybeSingle()) as any;
   if (!job) throw new ApiError(404, 'not_found', 'No such generation');
-  if (job.status !== 'submitted' || !job.request_id) return job;
+  if (!['submitted', 'completed'].includes(job.status) || !job.request_id) return job;
+  const ver = ok(await db.from('versions').select('file_path, render').eq('id', job.version_id).single()) as any;
+  // A previous attempt may have saved the version but lost the final job acknowledgement.
+  if (ver.file_path && ver.render?.state === 'ready') {
+    if (job.status !== 'completed') ok(await db.from('higgsfield_jobs').update({ status: 'completed', error: null, finished_at: new Date().toISOString() }).eq('id', job.id));
+    return { ...job, status: 'completed', error: null };
+  }
   const r = await fetcher(`${HF_BASE}/requests/${encodeURIComponent(job.request_id)}/status`, { headers: auth(creds), signal: AbortSignal.timeout(20_000) });
   const s = await r.json().catch(() => ({}));
   if (!r.ok) return job;
@@ -139,24 +154,27 @@ export async function refresh(db: SupabaseClient, jobId: string, creds: string, 
       const bytes = new Uint8Array(await vr.arrayBuffer());
       if (bytes.byteLength < 1000 || String.fromCharCode(...bytes.slice(4, 8)) !== 'ftyp') { await fail(db, job, job.version_id, 'failed', 'Higgsfield returned something that is not an MP4.'); }
       else {
-        // Claim the finish first so two pollers can't both write.
-        const claim = ok(await db.from('higgsfield_jobs').update({ status: 'completed', result_url: url, finished_at: new Date().toISOString() })
-          .eq('id', job.id).eq('status', 'submitted').select('id')) as any[];
-        if (claim.length) {
-          const path = `${job.asset_id}/${Date.now()}-higgsfield-${randomUUID().slice(0, 8)}.mp4`;
-          const up = await db.storage.from('ad-assets').upload(path, bytes, { contentType: 'video/mp4', upsert: false });
-          if (up.error) {
-            await db.from('higgsfield_jobs').update({ status: 'submitted', finished_at: null }).eq('id', job.id); // let the next poll retry
+        // Stable storage path + conditional version write make concurrent polls and recovery safe.
+        // A job is complete only AFTER both storage and the version record are ready.
+        const path = `${job.asset_id}/${job.id}-higgsfield.mp4`;
+        const hash = createHash('sha256').update(bytes).digest('hex');
+        const bucket = db.storage.from('ad-assets');
+        const up = await bucket.upload(path, bytes, { contentType: 'video/mp4', upsert: false });
+        if (up.error) {
+          // Another poll (or an interrupted prior attempt) may already have uploaded it.
+          const existing = await bucket.download(path);
+          if (existing.error || !existing.data || createHash('sha256').update(new Uint8Array(await existing.data.arrayBuffer())).digest('hex') !== hash)
             throw dbError(up.error);
-          }
-          const info = mp4Info(bytes);
-          const { data: ver } = await db.from('versions').select('render').eq('id', job.version_id).maybeSingle();
-          ok(await db.from('versions').update({
-            file_path: path, content_type: 'video/mp4', size_bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex'),
-            duration_sec: info.duration, width: info.width, height: info.height,
-            render: { ...(ver?.render || {}), state: 'ready', label: null, note: null, audio: job.audio ? 'generated' : 'none', request_id: job.request_id },
-          }).eq('id', job.version_id));
         }
+        const info = mp4Info(bytes);
+        ok(await db.from('versions').update({
+          file_path: path, content_type: 'video/mp4', size_bytes: bytes.byteLength, sha256: hash,
+          duration_sec: info.duration, width: info.width, height: info.height,
+          render: { ...(ver.render || {}), state: 'ready', label: null, note: null, audio: job.audio ? 'generated' : 'none', request_id: job.request_id },
+        }).eq('id', job.version_id).is('file_path', null));
+        const ready = ok(await db.from('versions').select('file_path, render').eq('id', job.version_id).single()) as any;
+        if (ready.file_path !== path || ready.render?.state !== 'ready') throw new ApiError(409, 'conflict', 'The generation result changed while it was being saved.');
+        ok(await db.from('higgsfield_jobs').update({ status: 'completed', result_url: url, error: null, finished_at: new Date().toISOString() }).eq('id', job.id));
       }
     }
   }

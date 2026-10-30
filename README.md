@@ -45,7 +45,7 @@ Nothing here uses Rumi or other Yoke production systems.
 
 ## Claude skill and API
 
-- Skill package: `skills/yoke-ad-maker/` (zip: `skills/yoke-ad-maker.zip`). Helper: `scripts/adstudio.py`.
+- Installable skill: `skills/ad-builder.zip` contains the complete workflow, helper and brand resources; no second skill is required. `skills/yoke-ad-maker/` is the maintained source and compatibility package. Rebuild both skills and the single-entry plugin with `python3 scripts/package-skills.py`. Replacing code in GitHub does not update an already-installed Claude skill: use its **Replace** action and verify the installed contents target this live app, not the retired Claude artifact.
 - API: `/api/v1/*`, authenticated with a personal token from **Connect Claude** (stored hashed, revocable). Needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel; all writes still go through owner/admin checks as the token's member.
 - Tests: `npm test` (database rules, API, Slack, UI) and `npm run test:e2e` (skill helper -> API -> database with real file bytes).
 

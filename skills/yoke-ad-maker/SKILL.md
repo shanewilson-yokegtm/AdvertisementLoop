@@ -7,20 +7,22 @@ description: Create branded Yoke static and video ads in your own Claude, save t
 
 Make ads in your own Claude, save the actual files to Ad Studio, gather input in Slack, and revise with human direction. The web app (https://advertisementloop-eight.vercel.app) is the shared library, comment thread, version history and approval surface.
 
+For a new ad, use a concept and format already supplied. Otherwise offer Static, Infographic video, or Higgsfield video and invite a brief. Avoid making someone repeat their request. If asked for concepts only, give concepts; don't force rendering or a library handoff. This skill contains its own helper and brand resources; no other skill is required.
+
 ## What's connected
 
-This skill talks to Ad Studio through `scripts/adstudio.py`. It needs two environment variables in the Claude you're using:
+This skill talks to Ad Studio through its bundled `scripts/adstudio.py`. Resolve this skill's installed folder and use the helper's absolute path; another skill's working directory will not contain this script. It uses this connection configuration in the Claude you're using:
 
-- `AD_STUDIO_API` = `https://advertisementloop-eight.vercel.app/api/v1`
+- `AD_STUDIO_API` defaults to `https://advertisementloop-eight.vercel.app/api/v1`; override it only for an explicitly selected environment.
 - `AD_STUDIO_TOKEN` = your personal token from Ad Studio > **Connect Claude**. It acts as you, with your permissions, and nothing more.
 
 Run `python3 scripts/adstudio.py me` first. Outcomes:
 
 - It prints your name: connected.
-- `not_configured`: no token here. Ask the person to set the variables in their Claude environment. Never ask them to paste the token into the chat, and never print it.
+- `not_configured`: no personal connection here. Explain that the server's Vercel/Supabase/Higgsfield keys do not authenticate this Claude conversation. Use a supported secure environment setup; never ask for a token in chat or invent a Claude setting for environment variables. Offer the app fallback if this client has no secure setup mechanism.
 - `api_not_enabled`, `network` or `upload_blocked`: the service or this environment can't reach Ad Studio. Keep making the creative work, then build a handoff bundle (`adstudio.py handoff`) for manual upload in the app. Say exactly what wasn't saved.
 
-Every save, share and feedback result must come from the script's output. If it didn't return an id or link, it didn't happen. Don't invent ids, links or tool names.
+Every save, share and feedback result must come from the script's output. If it didn't return an id or link, it didn't happen. Don't invent ids, links or tool names. The real shared library is the Vercel app above: never write to or return a legacy `claude.ai/artifact` library as a fallback.
 
 ## Permissions (enforced by Ad Studio, not by this skill)
 
@@ -43,7 +45,7 @@ Make real files with the tools available here. Check them before saving: readabl
 - **Motion / video:** the real rendered file plus a poster JPG, plus the source (timeline code, HTML, project zip) and any provider job ids in `--meta`.
 - **Not finished:** a storyboard, HTML preview, provider job or temporary URL is not a finished video. Save it with `save-pending` and a note saying what's missing.
 - **File types:** the script detects the real type. A WebM stays WebM.
-- **Higgsfield video:** made through Ad Studio, not the Higgsfield connector (that connector can't generate). See below.
+- **Higgsfield video:** use Ad Studio's server-side Higgsfield integration so account, ownership, usage and stored versions stay consistent. Do not silently substitute a separate connector or provider account. See below.
 
 ## Higgsfield video (Seedance 2.5)
 

@@ -73,6 +73,9 @@ ok('job is submitted with Higgsfield’s request id', r.job.status === 'submitte
 
 const again = await generate(sdb, actor(TENG), { prompt: 'A rep at a desk at night', idempotency_key: 'key-00000001', audio: true }, 'id:secret', APP, hf);
 ok('same press again never submits twice', posts.length === 1 && again.repeated && again.version_id === r.version_id);
+ok('reusing another owner’s key cannot return their job', (await rejects(generate(sdb, { ...actor(TENG), user_id: '00000000-0000-0000-0000-0000000000ee' }, { prompt: 'A rep at a desk at night', idempotency_key: 'key-00000001', audio: true }, 'c', APP, hf)))?.status === 403);
+ok('changed settings with an old key are a conflict', (await rejects(generate(sdb, actor(TENG), { prompt: 'Different scene', idempotency_key: 'key-00000001', audio: true }, 'c', APP, hf)))?.status === 409 && posts.length === 1);
+ok('provider submission includes its own stable idempotency key', posts[0].headers['Idempotency-Key'] === r.job.id);
 
 ok('13 s is refused (max 12)', (await rejects(generate(sdb, actor(TENG), { prompt: 'x', duration: 13, idempotency_key: 'key-00000002' }, 'c', APP, hf)))?.status === 400 && posts.length === 1);
 ok('3 s is refused (min 4)', (await rejects(generate(sdb, actor(TENG), { prompt: 'x', duration: 3, idempotency_key: 'key-00000003' }, 'c', APP, hf)))?.status === 400);
@@ -120,10 +123,45 @@ ok('no answer: reported as unknown outcome, not retried', e5?.code === 'timeout_
 
 // ---------- usage + cap ----------
 const u = await usage(sdb);
-ok('usage counts seconds requested this month (errors excluded)', u.seconds_this_month === 9 + 12 + 9 && u.monthly_cap_seconds === null, JSON.stringify(u));
+ok('an unknown submission keeps its budget reservation and can be inspected', (await db.query(`select status, error from higgsfield_jobs where idempotency_key='key-00000009'`)).rows[0].status === 'submitting');
+ok('usage includes unknown outcomes (definite errors excluded)', u.seconds_this_month === 9 + 12 + 9 + 9 && u.monthly_cap_seconds === null, JSON.stringify(u));
 process.env.HIGGSFIELD_MONTHLY_SECONDS = '35';
 ok('optional monthly cap blocks before paying', (await rejects(generate(sdb, actor(SHANE), { prompt: 'x', idempotency_key: 'key-00000010' }, 'c', APP, hf)))?.status === 402 && posts.length === before);
 delete process.env.HIGGSFIELD_MONTHLY_SECONDS;
+
+// ---------- saving a completed render must survive interrupted writes ----------
+state = 'completed';
+const recover = await generate(sdb, actor(TENG), { prompt: 'A repairable render', idempotency_key: 'recovery-000001' }, 'c', APP, hf);
+let failVersionWrite = true;
+const flaky = { ...sdb, from: table => {
+  const b = sdb.from(table), update = b.update;
+  b.update = row => {
+    if (table === 'versions' && row.file_path && failVersionWrite) {
+      failVersionWrite = false;
+      b.then = resolve => Promise.resolve({ data: null, error: { message: 'Temporary database write failure' } }).then(resolve);
+    }
+    return update(row);
+  };
+  return b;
+} };
+const interrupted = await rejects(refresh(flaky, recover.job.id, 'c', hf));
+let interruptedJob = (await db.query(`select status from higgsfield_jobs where id=$1`, [recover.job.id])).rows[0];
+ok('failed version write cannot mark the job complete', interrupted && interruptedJob.status === 'submitted' && (await db.query(`select file_path from versions where id=$1`, [recover.version_id])).rows[0].file_path === null);
+const afterUpload = sdb.objects.size;
+const recovered = await refresh(sdb, recover.job.id, 'c', hf);
+ok('retry reuses the uploaded bytes and finishes the version without generating again', recovered.status === 'completed' && sdb.objects.size === afterUpload && (await db.query(`select render->>'state' s from versions where id=$1`, [recover.version_id])).rows[0].s === 'ready');
+await db.query(`update higgsfield_jobs set status='submitted' where id=$1`, [recover.job.id]);
+const repaired = await refresh(sdb, recover.job.id, 'c', async () => { throw new Error('Provider must not be called again'); });
+ok('saved video repairs a lost job acknowledgement without contacting the provider', repaired.status === 'completed');
+
+const concurrent = await generate(sdb, actor(TENG), { prompt: 'One file for two pollers', idempotency_key: 'recovery-000002' }, 'c', APP, hf);
+const countBeforePolls = sdb.objects.size;
+const two = await Promise.all([refresh(sdb, concurrent.job.id, 'c', hf), refresh(sdb, concurrent.job.id, 'c', hf)]);
+ok('concurrent completion checks store exactly one video and both finish', two.every(j => j.status === 'completed') && sdb.objects.size === countBeforePolls + 1);
+const legacy = await generate(sdb, actor(TENG), { prompt: 'Recover an old premature completion', idempotency_key: 'recovery-000003' }, 'c', APP, hf);
+await db.query(`update higgsfield_jobs set status='completed' where id=$1`, [legacy.job.id]);
+ok('legacy jobs marked complete before saving can still recover', (await refresh(sdb, legacy.job.id, 'c', hf)).status === 'completed' && (await db.query(`select file_path from versions where id=$1`, [legacy.version_id])).rows[0].file_path);
+ok('a truncated MP4 extended box header is safely ignored', mp4Info(new Uint8Array([0,0,0,1,102,116,121,112])).width === null);
 
 // ---------- Claude's token API (/api/v1/higgsfield/*): same generate, same limits ----------
 {

@@ -123,7 +123,7 @@ export async function handle(db: SupabaseClient, a: Actor, method: string, parts
       const asset = ok(await db.from('assets').select('*').eq('id', assetId).maybeSingle()) as any;
       if (!asset) throw new ApiError(404, 'not_found', `Asset ${assetId} not found`);
       const versions = ok(await db.from('versions').select('*').eq('asset_id', assetId).order('version')) as any[];
-      const comments = ok(await db.from('comments').select('id, version_id, author, legacy_author, body, at_sec, audio_path, status, applied_in, resolution_note, created_at, source, source_link').eq('asset_id', assetId).order('created_at')) as any[];
+      const comments = ok(await db.from('comments').select('id, version_id, author, legacy_author, body, at_sec, audio_path, status, decision, decided_by, decided_at, applied_in, resolution_note, created_at, source, source_link, edited_at, deleted_at, body_history').eq('asset_id', assetId).order('created_at')) as any[];
       const paths = versions.flatMap(v => [v.file_path, v.poster_path, v.source?.editable_path]).concat(comments.map(c => c.audio_path)).filter(Boolean);
       const signed: Record<string, string> = {};
       if (paths.length) { const { data } = await db.storage.from('ad-assets').createSignedUrls([...new Set(paths)], 3600); (data || []).forEach(d => { if (d.path && d.signedUrl) signed[d.path] = d.signedUrl; }); }

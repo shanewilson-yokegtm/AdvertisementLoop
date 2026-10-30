@@ -138,9 +138,23 @@ export async function shareVersion(db: SupabaseClient, slack: SlackApi, actor: {
 export async function handleSlackEvent(db: SupabaseClient, slack: SlackApi, payload: any, appUrl: string): Promise<string> {
   if (payload?.type !== 'event_callback' || !payload.event_id) return 'ignored';
   const seen = await db.from('slack_events').insert({ event_id: payload.event_id, type: payload.event?.type || null, outcome: 'processing' });
-  if (seen.error) return 'duplicate_event';
+  if (seen.error) {
+    if (seen.error.code !== '23505') throw new Error('Could not record the Slack event');
+    const prior = await db.from('slack_events').select('outcome, received_at').eq('event_id', payload.event_id).single();
+    if (prior.error || !prior.data) throw new Error('Could not read the Slack event');
+    const stale = prior.data.outcome === 'processing' && Date.now() - new Date(prior.data.received_at).getTime() > 60_000;
+    if (!String(prior.data.outcome).startsWith('error:') && !stale)
+      return prior.data.outcome === 'processing' ? 'event_busy' : 'duplicate_event';
+    // Reclaim a failed or abandoned delivery, without letting two retries process it together.
+    const receivedAt = prior.data.received_at instanceof Date ? prior.data.received_at.toISOString() : prior.data.received_at;
+    const claim = await db.from('slack_events').update({ outcome: 'processing', received_at: new Date().toISOString() })
+      .eq('event_id', payload.event_id).eq('outcome', prior.data.outcome).eq('received_at', receivedAt).select('event_id');
+    if (claim.error) throw new Error('Could not resume the Slack event');
+    if (!claim.data?.length) return 'event_busy';
+  }
   const outcome = await route(db, slack, payload, appUrl).catch(e => 'error: ' + String(e?.message || e).slice(0, 200));
-  await db.from('slack_events').update({ outcome }).eq('event_id', payload.event_id);
+  const saved = await db.from('slack_events').update({ outcome }).eq('event_id', payload.event_id);
+  if (saved.error) throw new Error('Could not save the Slack event outcome');
   return outcome;
 }
 

@@ -13,9 +13,13 @@ import { pgClient } from './pgshim.mjs';
 
 const here = import.meta.dirname; const root = path.resolve(here, '../..');
 const require = createRequire(import.meta.url);
+const modules = {};
 function load(file) {
+  if (modules[file]) return modules[file];
   const code = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const m = { exports: {} }; new Function('require', 'module', 'exports', code)(id => id === './slack' ? load('src/lib/server/slack.ts') : require(id), m, m.exports); return m.exports;
+  const m = { exports: {} }; modules[file] = m.exports;
+  new Function('require', 'module', 'exports', code)(id => ['./slack', './api', './higgsfield'].includes(id) ? load(`src/lib/server/${id.slice(2)}.ts`) : require(id), m, m.exports);
+  return Object.assign(modules[file], m.exports);
 }
 const { authenticate, handle, ApiError } = load('src/lib/server/api.ts');
 let pass = 0, fail = 0;
@@ -40,6 +44,8 @@ const T = { teng: await tokenFor(TENG), henry: await tokenFor(HENRY) };
 const sdb = pgClient(db); const bytes = new Map();
 let port;
 sdb.storage.from = () => ({
+  upload: async (p, buf, o) => { if (bytes.has(p)) return { data: null, error: { message: 'exists' } }; bytes.set(p, { buf: Buffer.from(buf), type: o.contentType }); return { data: { path: p }, error: null }; },
+  download: async p => { const v = bytes.get(p); return v ? { data: new Blob([v.buf], { type: v.type }), error: null } : { data: null, error: { message: 'not found' } }; },
   createSignedUrl: async p => ({ data: { signedUrl: `http://127.0.0.1:${port}/storage/${p}` }, error: null }),
   createSignedUrls: async ps => ({ data: ps.map(p => ({ path: p, signedUrl: `http://127.0.0.1:${port}/storage/${p}` })), error: null }),
   createSignedUploadUrl: async p => ({ data: { signedUrl: `http://127.0.0.1:${port}/upload/${p}`, path: p, token: 't' }, error: null }),
@@ -99,6 +105,30 @@ r = (await run('teng', ['get', M]));
 const mv1 = r.out.versions.find(v => v.version === 1);
 const fetched = Buffer.from(await (await fetch(mv1.file_url)).arrayBuffer());
 ok('a fresh conversation retrieves the video, poster and source', createHash('sha256').update(fetched).digest('hex') === sha(mp4) && mv1.poster_url && mv1.editable_url && mv1.content_type === 'video/mp4');
+
+// The actual Python Higgsfield commands cross HTTP and the real handler; only the paid provider is replaced.
+const realFetch = globalThis.fetch;
+let hfSubmits = 0;
+process.env.HF_CREDENTIALS = 'test-only-no-live-provider';
+globalThis.fetch = async (url, init) => {
+  if (String(url).startsWith('https://api.higgsfield.ai/')) {
+    if (init?.method === 'POST') { hfSubmits++; return Response.json({ request_id: 'fake-generation-request', status: 'queued' }); }
+    return Response.json({ status: 'completed', video: { url: 'https://fake-higgsfield.example/video.mp4' } });
+  }
+  if (String(url) === 'https://fake-higgsfield.example/video.mp4') return new Response(readFileSync(mp4));
+  return realFetch(url, init);
+};
+try {
+  const g = await run('teng', ['higgsfield', '--prompt', 'A rep putting away sticky notes', '--seconds', '4', '--wait', '0', '--key', 'hf-helper-e2e-001']);
+  ok('Higgsfield helper authenticates, submits through the server and returns a real asset link', g.code === 0 && g.out.job_id && g.out.link.includes(g.out.asset_id) && hfSubmits === 1);
+  const repeated = await run('teng', ['higgsfield', '--prompt', 'A rep putting away sticky notes', '--seconds', '4', '--wait', '0', '--key', 'hf-helper-e2e-001']);
+  ok('a repeated helper invocation does not resubmit to Higgsfield', repeated.out.job_id === g.out.job_id && hfSubmits === 1);
+  const finished = await run('teng', ['hf-status', g.out.job_id]);
+  const context = await run('teng', ['get', g.out.asset_id]);
+  const media = context.out.versions[0];
+  const actual = Buffer.from(await (await realFetch(media.file_url)).arrayBuffer());
+  ok('Higgsfield status saves the provider video bytes into the shared library', finished.code === 0 && finished.out.status === 'completed' && media.render.state === 'ready' && createHash('sha256').update(actual).digest('hex') === sha(mp4));
+} finally { globalThis.fetch = realFetch; delete process.env.HF_CREDENTIALS; }
 
 // another member
 r = (await run('henry', ['save', S, '--file', png, '--meta', '{}']));

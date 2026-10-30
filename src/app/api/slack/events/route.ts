@@ -15,5 +15,6 @@ export async function POST(req: NextRequest) {
   let payload: any; try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: 'bad_json' }, { status: 400 }); }
   if (payload.type === 'url_verification') return NextResponse.json({ challenge: payload.challenge });
   const outcome = await handleSlackEvent(serviceClient(), slackApi(token), payload, process.env.APP_URL || req.nextUrl.origin);
-  return NextResponse.json({ ok: true, outcome });
+  const retry = outcome.startsWith('error:') || outcome === 'event_busy';
+  return NextResponse.json({ ok: !retry, outcome }, { status: retry ? 503 : 200 });
 }
