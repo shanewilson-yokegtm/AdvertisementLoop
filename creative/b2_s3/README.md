@@ -7,3 +7,5 @@ From v2 the artboard markup lives here as plain HTML so the revision worker can 
 - `render.mjs`: `node render.mjs out.png` renders the PNG with Chromium.
 
 v2 (revision job a8282de5, review 274a77b1): bottom copy cut to 7 words with the sales keyword "ideal buyers" highlighted.
+
+v3 (revision job 7bacb349, review b2720427): bottom copy replaced with "Yoke automates outreach so your calendar is always full." ("always full" keeps the lime highlight).
