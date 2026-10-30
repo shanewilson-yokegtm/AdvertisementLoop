@@ -21,9 +21,9 @@ One run works through every eligible job, one at a time, oldest first:
 3. Do that job end to end (sections 2-6). If it ends in a terminal state (`done`, `failed`, `needs_input`,
    `cancelled`), including a failure of this one job, record it and go back to step 2 for the next job.
    Never leave a job you claimed in `working` on purpose.
-4. Run-time limit: do not claim a new job once **40 minutes** have passed since the run started, and never claim
-   more than **8 jobs** in one run. Finish the job in hand, then stop. Unclaimed jobs stay `queued` for the next
-   hourly pass (:32 every hour).
+4. Run-time limit: do not claim a new job once **40 minutes** have passed since the run started. Finish the job in
+   hand, then stop. Unclaimed jobs stay `queued` for the next hourly pass (:32 every hour). There is no job-count
+   cap: before 40 minutes, keep going until the queue is empty.
 
 Each claim is one statement with `for update skip locked`, so two overlapping runs never take the same job, and only
 one job per asset can be active (the app refuses a second run while one is queued or executing). A job claimed
