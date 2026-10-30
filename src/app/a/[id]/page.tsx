@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
-import { useRows, useSigned, useMembers, can, canManage, fmtDate, fmtSec, fmtBytes, isVideo, FORMATS, KIND_LABEL, type Asset, type Version, type Review, type Comment } from '@/lib/data';
+import { useRows, useSigned, useMembers, can, canManage, fmtDate, fmtSec, fmtBytes, isVideo, frameLabel, KIND_LABEL, type Asset, type Version, type Review, type Comment } from '@/lib/data';
 import { Player } from '@/components/Media';
 import { statusChip, renderChip } from '@/components/Chips';
 import { useApp } from '@/components/Shell';
@@ -40,10 +40,10 @@ function AssetDetail({ id }: { id: string }) {
   const urls = useSigned(v ? [v.file_path, v.poster_path] : []);
   const audioUrls = useSigned(comments.rows.map(c => c.audio_path));
   const jobs = useRows<any>('revision_jobs', { filter: ['asset_id', id], order: 'created_at' });
+  const procs = useRows<Processing>('processing', { filter: ['asset_id', id], order: 'created_at', asc: true });
   const hfJobs = useRows<any>('higgsfield_jobs', { filter: ['asset_id', id], order: 'created_at' });
   const hfLive = hfJobs.rows.find((j: any) => j.status === 'submitted');
-  useHiggsfieldPoll(hfLive?.id || null, () => { hfJobs.reload(); versions.reload(); });
-  const procs = useRows<Processing>('processing', { filter: ['asset_id', id], order: 'created_at', asc: true });
+  useHiggsfieldPoll(hfLive?.id || null, () => { hfJobs.reload(); versions.reload(); procs.reload(); comments.reload(); });
   const playhead = () => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return pv ? Math.round(pv.currentTime * 10) / 10 : null; };
   // Voice is the primary way to review: the live transcript fills the note box, the audio is kept with it.
   const cmtBase = useRef('');
@@ -118,7 +118,7 @@ function AssetDetail({ id }: { id: string }) {
         <div className="titleblock">
           <Link href="/" className="back">← Library</Link>
           <h1>{a.concept_name.trim()}</h1>
-          <div className="meta">{ownerName} · {KIND_LABEL[a.kind]} · {FORMATS[a.format]?.label || a.format}{v.duration_sec ? ' · ' + fmtSec(v.duration_sec) : ''}</div>
+          <div className="meta">{ownerName} · {KIND_LABEL[a.kind]} · {frameLabel(v, a.format)}{v.duration_sec ? ' · ' + fmtSec(v.duration_sec) : ''}</div>
           <div className="statusline">{renderChip(v) || statusChip(rev?.status || 'pending')}
             {a.archived ? <span className="chip plain">Archived</span> : null}
             <span className="muted small">{rev ? `${rev.status === 'approved' ? 'Approved' : 'Changes requested'} by ${who(rev.reviewer)} · ${fmtDate(rev.at)}` : `v${v.version} by ${who(v.created_by, v.legacy_creator)} · ${fmtDate(v.created_at)}`}</span></div>

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
-import { useRows, useSigned, useMembers, can, useInbox, FORMATS, type Asset, type Version, type Review } from '@/lib/data';
+import { useRows, useSigned, useMembers, can, useInbox, FORMATS, frameLabel, type Asset, type Version, type Review } from '@/lib/data';
 import { Thumb } from '@/components/Media';
 import { useApp } from '@/components/Shell';
 import Upload from '@/components/Upload';
@@ -43,24 +43,24 @@ export default function Library() {
   const urls = useSigned(items.flatMap(x => [x.v.poster_path || (x.v.content_type?.startsWith('image/') ? x.v.file_path : null)]));
   const download = async ({ a, v }: Item) => {
     if (!v.file_path) return;
-    const name = `${a.concept_name.replace(/[^\w -]/g, '').trim().slice(0, 60)} ${fmt(a.format).replace(':', 'x')}.${v.file_path.split('.').pop()}`;
+    const name = `${a.concept_name.replace(/[^\w -]/g, '').trim().slice(0, 60)} ${frameLabel(v, a.format).replace(':', 'x')}.${v.file_path.split('.').pop()}`;
     const { data } = await sb().storage.from('ad-assets').createSignedUrl(v.file_path, 600, { download: name });
     if (!data?.signedUrl) return;
     const el = document.createElement('a'); el.href = data.signedUrl; el.rel = 'noopener'; document.body.appendChild(el); el.click(); el.remove();
   };
   const card = (x: Item) => { const { a, v } = x; const n = pendingFor(a.id);
     const title = a.concept_name.trim();
-    return <article key={a.id} className="card" aria-label={`${title}, ${fmt(a.format)}`}>
+    return <article key={a.id} className="card" aria-label={`${title}, ${frameLabel(v, a.format)}`}>
       <Link className="cardlink" href={`/a/${a.id}`}>
         <div className="frame">
           <span className="badge">{renderChip(v) || statusChip(x.status)}</span>
           {n ? <span className="count" aria-label={`${n} feedback to decide`}>{n}</span> : null}
           <div className={`thumb ${a.format}`}><Thumb v={v} urls={urls} /></div>
         </div>
-        <div className="meta"><div className="t">{title}</div><div className="sub">{ownerOf(x)} · {fmt(a.format)}</div></div>
+        <div className="meta"><div className="t">{title}</div><div className="sub">{ownerOf(x)} · {frameLabel(v, a.format)}</div></div>
       </Link>
       {x.status === 'approved' && v.file_path ? <div className="foot"><span className="muted small">v{v.version}</span>
-        <button type="button" className="btn small" aria-label={`Download ${title}, ${fmt(a.format)}`} onClick={() => void download(x)}>Download</button></div> : null}
+        <button type="button" className="btn small" aria-label={`Download ${title}, ${frameLabel(v, a.format)}`} onClick={() => void download(x)}>Download</button></div> : null}
     </article>; };
   const err = assets.err || versions.err;
   const VIEWS: [View, string][] = [['all', 'All'], ['feedback', 'Feedback for you'], ['approved', 'Approved']];

@@ -45,7 +45,7 @@ function reviewFixture(initial = [v1], query = '') {
   const mocks = {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
     'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); }, push: url => { pushed.push(url); } }) },
-    '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {} },
+    '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {}, frameLabel: (v, f) => f },
     '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }), activeProcessing: p => (p && ['approved', 'executing'].includes(p.status) ? p : null) },
     '@/components/ChangeLog': { __esModule: true, default: () => null },
     '@/components/Higgsfield': { useHiggsfieldPoll: () => {} },
@@ -357,7 +357,7 @@ test('Library: one card per asset; same titles are never merged; counts, links a
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
     '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => id => ({ shane: 'Shane', teng: 'Teng' })[id] || 'Teammate',
       useInbox: (scope, on = true) => ({ rows: scope === 'all' && on ? [{ asset_id: 'b1', pending: 2 }] : [] }), can: () => true,
-      FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {} },
+      FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {}, frameLabel: (v, f) => ({ feed45: '4:5', vertical: '9:16', square: '1:1' })[f] },
     '@/lib/supabase/browser': { sb: () => ({ storage: { from: () => ({ createSignedUrl: async (p, _s, o) => { signedFor.push([p, o.download]); return { data: { signedUrl: 'about:blank#' + p } }; } }) } }) },
     '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
     '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: s => React.createElement('span', null, s), renderChip: () => null },
@@ -393,7 +393,7 @@ test('Library: members see no admin scope control', async () => {
   member = { user_id: 'teng', role: 'creator' };
   const Page = source('src/app/page.tsx', {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
-    '@/lib/data': { useRows: () => ({ rows: [], ready: true }), useSigned: () => ({}), useMembers: () => () => '', useInbox: () => ({ rows: [] }), can: () => true, FORMATS: {} },
+    '@/lib/data': { useRows: () => ({ rows: [], ready: true }), useSigned: () => ({}), useMembers: () => () => '', useInbox: () => ({ rows: [] }), can: () => true, FORMATS: {}, frameLabel: () => '' },
     '@/lib/supabase/browser': { sb: () => ({}) }, '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
     '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: () => null, renderChip: () => null },
   }).default;
@@ -483,4 +483,41 @@ test('magic-link callback returns only to same-origin paths, query kept', async 
     await mod.GET({ url: 'https://studio.example/auth/callback?code=c&next=' + encodeURIComponent(next) });
   }
   assert.deepEqual(redirects, ['https://studio.example/oauth/consent?authorization_id=abc', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/%0d%0aLocation:x']);
+});
+
+test('frame labels report the real media frame, not the preset name', () => {
+  const { frameLabel } = source('src/lib/data.ts', { './supabase/browser': { sb: () => ({}) } });
+  assert.equal(frameLabel({ width: 720, height: 960 }, 'feed45'), '3:4', 'a feed preset rendered at 3:4 is labelled 3:4');
+  assert.equal(frameLabel({ width: 1080, height: 1350 }, 'feed45'), '4:5');
+  assert.equal(frameLabel({ width: 1280, height: 720 }, 'landscape'), '16:9', 'Higgsfield landscape is 16:9, not 1.91:1');
+  assert.equal(frameLabel({ width: 720, height: 1280 }, 'vertical'), '9:16');
+  assert.equal(frameLabel({ width: null, height: null }, 'feed45'), '4:5', 'no media yet: the preset');
+  assert.equal(frameLabel({ width: 1000, height: 700 }, 'square'), '1000×700', 'unknown ratios show the real size');
+});
+
+test('Higgsfield ads regenerate in Higgsfield only after an explicit paid-render confirmation', async () => {
+  const calls = []; const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { calls.push([String(url), init?.body ? JSON.parse(init.body) : null]); return new Response(JSON.stringify(String(url).includes('usage') ? { seconds_this_month: 54, monthly_cap_seconds: 300 } : { processing_id: 'p', job_id: 'j', status: 'submitted' }), { status: 200 }); };
+  const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({ rpc: async () => ({ error: null }) }) }, '@/lib/data': { fmtDate: () => '' } }).default;
+  const hv = { ...v1, file_path: 'a.mp4', render: { state: 'ready' }, spec: { type: 'higgsfield', duration: 6, aspect_ratio: '3:4', audio: false, prompt: 'p' } };
+  const cOk = { id: 'c1', status: 'open', decision: 'approved', body: 'Heavier rain' };
+  await mount(() => React.createElement(Bar, { a: asset, vs: [hv], comments: [cOk], proc: null, reload: () => {}, toast: () => {}, onOpen: () => {} }));
+  assert.ok(!button('Regenerate ad'), 'no worker regenerate for a Higgsfield video');
+  await act(async () => button('Regenerate in Higgsfield').click()); await flush();
+  assert.equal(calls.filter(c => c[0].includes('revise')).length, 0, 'nothing paid on the first press');
+  assert.match(document.body.textContent, /Paid render: 6s · 3:4 · no sound · 54s used this month of 300/);
+  await act(async () => button('Render v2').click()); await flush();
+  const rev = calls.filter(c => c[0].includes('/api/higgsfield/revise'));
+  assert.equal(rev.length, 1); assert.equal(rev[0][1].confirm, true); assert.equal(rev[0][1].asset_id, 'asset');
+  globalThis.fetch = realFetch; await finish();
+});
+
+test('a Higgsfield regenerate in progress says so honestly, with no cancel and any unclear outcome shown', async () => {
+  const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({}) }, '@/lib/data': { fmtDate: () => '' } }).default;
+  const proc = { id: 'p', reviewed_version_id: 'asset_v1', comment_ids: ['c1'], status: 'executing', engine: 'higgsfield', rev: 1, message: 'Higgsfield’s answer was unclear, so it may be rendering.' };
+  await mount(() => React.createElement(Bar, { a: asset, vs: [v1], comments: [], proc, reload: () => {}, toast: () => {}, onOpen: () => {} }));
+  assert.match(document.body.textContent, /Rendering v2 in Higgsfield/); assert.match(document.body.textContent, /frozen when you pressed Regenerate/);
+  assert.match(document.body.textContent, /answer was unclear/);
+  assert.ok(!button('Cancel') && !button('Regenerate in Higgsfield'));
+  await finish();
 });

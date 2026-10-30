@@ -21,7 +21,7 @@ const READ = { readOnlyHint: true, destructiveHint: false, openWorldHint: false 
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
 export const TOOL_NAMES = ['whoami', 'brand_pack', 'list_ads', 'get_ad', 'feedback_inbox', 'create_ad', 'request_upload_urls', 'save_version', 'save_pending_version',
-  'add_feedback', 'decide_feedback', 'regenerate_ad', 'revert_ad', 'list_slack_channels', 'post_to_slack', 'higgsfield_usage', 'higgsfield_generate', 'higgsfield_status'] as const;
+  'add_feedback', 'decide_feedback', 'regenerate_ad', 'revert_ad', 'list_slack_channels', 'post_to_slack', 'higgsfield_usage', 'higgsfield_generate', 'higgsfield_regenerate', 'higgsfield_status'] as const;
 
 export function buildMcpServer(db: SupabaseClient, actor: Actor, appUrl: string, call: Call = (m, p, b, q) => handle(db, actor, m, p, b ?? null, new URLSearchParams(q || {}), appUrl)) {
   const s = new McpServer({ name: 'yoke-ad-studio', version: '1.0.0' }, {
@@ -96,6 +96,12 @@ export function buildMcpServer(db: SupabaseClient, actor: Actor, appUrl: string,
       const key = 'mcp-' + createHash('sha256').update(JSON.stringify([actor.user_id, a.asset_id || a.concept_name || '', a.prompt, a.seconds, a.format, a.sound])).digest('hex').slice(0, 40);
       return call('POST', ['higgsfield', 'generate'], { prompt: a.prompt, duration: a.seconds, format: a.format, audio: a.sound, asset_id: a.asset_id ?? null, concept_name: a.concept_name, idempotency_key: key });
     });
+  reg('higgsfield_regenerate', { title: 'Regenerate Higgsfield video (paid)', description: 'Owner/admin only. ONE billable render that applies the approved feedback (frozen when you call this) to the latest Higgsfield version, ' +
+      'keeping its length, frame and sound. Feedback is marked applied only after the new video is saved. Before calling: show the approved items, length and this month\'s usage, and get a yes.',
+    inputSchema: { asset_id: ID, note: z.string().max(2000).optional(),
+      person_confirmed: z.literal(true).describe('true only after the person approved this paid regenerate in this conversation') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    a => call('POST', ['higgsfield', 'revise'], { asset_id: a.asset_id, note: a.note ?? null, person_confirmed: true }));
   reg('higgsfield_status', { title: 'Higgsfield render status', description: 'Check a render once. The server saves the playable video as the version when it is ready.',
     inputSchema: { job_id: z.string().uuid() }, annotations: READ }, a => call('GET', ['higgsfield', 'status'], null, { job: a.job_id }));
   return s;

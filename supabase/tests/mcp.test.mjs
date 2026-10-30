@@ -137,7 +137,7 @@ const cT = await connect(teng), cH = await connect(henry), cS = await connect(sh
 const tools = (await cT.listTools()).tools;
 ok('every tool is listed with a title and annotations', TOOL_NAMES.every(n => tools.find(t => t.name === n && t.annotations && t.title)) && tools.length === TOOL_NAMES.length);
 const paid = tools.find(t => t.name === 'higgsfield_generate'), slack = tools.find(t => t.name === 'post_to_slack');
-ok('paid generation and Slack posting are separate open-world tools', paid.annotations.openWorldHint === true && slack.annotations.openWorldHint === true && tools.filter(t => t.annotations.openWorldHint).length === 2);
+ok('paid generation, paid regenerate and Slack posting are separate open-world tools', paid.annotations.openWorldHint === true && slack.annotations.openWorldHint === true && tools.filter(t => t.annotations.openWorldHint).length === 3 && tools.find(t => t.name === 'higgsfield_regenerate').annotations.openWorldHint === true);
 ok('read tools are marked read-only', ['whoami', 'list_ads', 'get_ad', 'feedback_inbox', 'brand_pack'].every(n => tools.find(t => t.name === n).annotations.readOnlyHint === true));
 ok('whoami is the signed-in member', parse(await cT.callTool({ name: 'whoami', arguments: {} })).user_id === TENG);
 const got = parse(await cH.callTool({ name: 'get_ad', arguments: { asset_id: asset.id } }));

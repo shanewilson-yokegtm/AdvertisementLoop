@@ -50,10 +50,10 @@ const info = mp4Info(new Uint8Array(mp4()));
 ok('reads duration and size from an MP4', info.duration === 9 && info.width === 720 && info.height === 1280, JSON.stringify(info));
 
 // Fake Higgsfield
-let posts = [], state = 'queued', postStatus = 200;
+let posts = [], state = 'queued', postStatus = 200, postNoId = false;
 const hf = async (url, init = {}) => {
   url = String(url);
-  if (init.method === 'POST') { posts.push({ url, headers: init.headers, body: JSON.parse(init.body) }); return new Response(JSON.stringify(postStatus === 200 ? { request_id: 'req-' + posts.length, status: 'queued' } : { detail: 'Not enough credits' }), { status: postStatus }); }
+  if (init.method === 'POST') { posts.push({ url, headers: init.headers, body: JSON.parse(init.body) }); return new Response(JSON.stringify(postStatus === 200 ? (postNoId ? { status: 'queued' } : { request_id: 'req-' + posts.length, status: 'queued' }) : { detail: postStatus >= 500 ? 'Upstream error' : 'Not enough credits' }), { status: postStatus }); }
   if (url.includes('/requests/')) return Response.json(state === 'completed' ? { status: 'completed', video: { url: 'https://cdn.example/out.mp4' } } : { status: state });
   if (url === 'https://cdn.example/out.mp4') return new Response(mp4());
   return new Response('?', { status: 404 });
@@ -184,6 +184,94 @@ ok('a truncated MP4 extended box header is safely ignored', mp4Info(new Uint8Arr
     delete process.env.HF_CREDENTIALS;
     ok('API: no server key -> higgsfield_not_connected, nothing sent', (await rejects(handle(sdb, actor(TENG), 'POST', ['higgsfield', 'generate'], { prompt: 'x', idempotency_key: 'hf-api-00000003' }, q(), APP)))?.code === 'higgsfield_not_connected' && posts.length === before + 1);
   } finally { globalThis.fetch = realFetch; delete process.env.HF_CREDENTIALS; }
+}
+
+// ---------- Regenerate a Higgsfield ad from approved feedback (frozen snapshot, same parent, applied only after save) ----------
+{
+  const { startHiggsfieldRevision, revisionPrompt } = load('src/lib/server/higgsfield.ts');
+  const HENRY = '00000000-0000-0000-0000-0000000000ee';
+  await db.exec(`insert into role_grants values ('henry2@yokegtm.com','creator'); insert into auth.users(id,email) values ('${HENRY}','henry2@yokegtm.com');`);
+  state = 'queued'; postStatus = 200; postNoId = false;
+  const row = async (t, id) => (await db.query(`select * from ${t} where id = $1`, [id])).rows[0];
+  const comment = async (assetId, versionId, author, body, at = null) => (await db.query(`insert into comments(asset_id, version_id, author, body, at_sec) values ($1,$2,$3,$4,$5) returning id`, [assetId, versionId, author, body, at])).rows[0].id;
+  const approve = async id => { const r = await sdb.rpc('feedback_decide', { p_comment: id, p_decision: 'approved', p_actor: TENG }); if (r.error) throw new Error(r.error.message); };
+  const finished = async (prompt, format, key, extra = {}) => { const g = await generate(sdb, actor(TENG), { prompt, format, duration: 5, audio: false, idempotency_key: key, ...extra }, 'c', APP, hf); state = 'completed'; await refresh(sdb, g.job.id, 'c', hf); state = 'queued'; return g; };
+
+  // Format comes from the ad, never a silent 9:16.
+  const feed = await finished('Rain on a sales floor', 'feed45', 'rev-base-000001');
+  const feedV = await row('versions', feed.version_id);
+  ok('feed preset renders a true 3:4 frame and stores the real size', posts.at(-1).body.aspect_ratio === '3:4' && feedV.width === 720 && feedV.render.state === 'ready');
+  let before = posts.length;
+  const more = await generate(sdb, actor(TENG), { asset_id: feed.asset_id, prompt: 'Rain, take two', duration: 5, idempotency_key: 'rev-fmt-0000001' }, 'c', APP, hf);
+  ok('a new version on a feed ad keeps 3:4 when format is omitted', posts.length === before + 1 && posts.at(-1).body.aspect_ratio === '3:4');
+  ok('asking for 9:16 on a feed ad is refused, nothing sent', (await rejects(generate(sdb, actor(TENG), { asset_id: feed.asset_id, prompt: 'x', format: 'vertical', idempotency_key: 'rev-fmt-0000002' }, 'c', APP, hf)))?.status === 400 && posts.length === before + 1);
+  state = 'completed'; await refresh(sdb, more.job.id, 'c', hf); state = 'queued';
+
+  // Approved feedback on the latest version, then Regenerate.
+  const c1 = await comment(feed.asset_id, more.version_id, HENRY, 'Make the rain heavier', 2);
+  const c2 = await comment(feed.asset_id, more.version_id, HENRY, 'Not approved, should be ignored');
+  await approve(c1);
+  ok('only the owner or an admin can regenerate', (await rejects(startHiggsfieldRevision(sdb, actor(HENRY), feed.asset_id, null, 'c', APP, hf)))?.status === 403);
+  before = posts.length;
+  const rv = await startHiggsfieldRevision(sdb, actor(TENG), feed.asset_id, 'Keep the desk lamp', 'c', APP, hf);
+  const sent = posts.at(-1).body;
+  ok('one paid submit with the parent\'s length, frame and sound', posts.length === before + 1 && sent.duration === 5 && sent.aspect_ratio === '3:4' && sent.generate_audio === false);
+  ok('prompt = parent prompt + approved items + owner note only', sent.prompt.startsWith('Rain, take two') && sent.prompt.includes('Make the rain heavier (at 2s)') && sent.prompt.includes('Keep the desk lamp') && !sent.prompt.includes('should be ignored'));
+  const proc = await row('processing', rv.processing_id);
+  ok('processing is a Higgsfield run on the exact reviewed version', proc.engine === 'higgsfield' && proc.status === 'executing' && proc.reviewed_version_id === more.version_id);
+  const nv = await row('versions', rv.version_id);
+  ok('new version links its parent and processing', nv.parent_version_id === more.version_id && nv.source.processing_id === rv.processing_id && nv.render.state === 'rendering');
+  ok('feedback is NOT applied on submit', (await row('comments', c1)).status === 'open');
+  // A Slack edit while rendering must not change what was approved.
+  await db.query(`update comments set body = 'Make it sunny instead', edited_at = now() where id = $1`, [c1]);
+  const snap = (await row('processing', rv.processing_id)).feedback_snapshot;
+  ok('approved text and attribution are frozen', snap.length === 1 && snap[0].body === 'Make the rain heavier' && snap[0].author === HENRY && snap[0].comment_id === c1 && snap[0].at_sec === 2);
+  ok('approve/reject is locked while it renders', !!(await sdb.rpc('feedback_decide', { p_comment: c1, p_decision: 'rejected', p_actor: TENG })).error);
+  before = posts.length;
+  const again = await startHiggsfieldRevision(sdb, actor(TENG), feed.asset_id, 'Keep the desk lamp', 'c', APP, hf);
+  ok('pressing Regenerate again returns the same render, nothing paid twice', again.repeated && again.job.id === rv.job.id && posts.length === before);
+  state = 'completed'; await refresh(sdb, rv.job.id, 'c', hf); state = 'queued';
+  const doneP = await row('processing', rv.processing_id), doneC = await row('comments', c1);
+  ok('after the playable video is stored: feedback applied in the new version, processing done', doneP.status === 'done' && doneP.result_version_id === rv.version_id && doneC.status === 'applied' && doneC.applied_in === rv.version_id && (await row('versions', rv.version_id)).file_path);
+  ok('unapproved feedback is untouched', (await row('comments', c2)).status === 'open');
+  ok('a second poll after completion changes nothing', (await refresh(sdb, rv.job.id, 'c', hf)).status === 'completed' && (await row('processing', rv.processing_id)).rev === doneP.rev);
+
+  // Definite refusal: processing failed, feedback stays approved for a later try.
+  const c3 = await comment(feed.asset_id, rv.version_id, HENRY, 'Slower ending'); await approve(c3);
+  postStatus = 402;
+  const refused = await rejects(startHiggsfieldRevision(sdb, actor(TENG), feed.asset_id, null, 'c', APP, hf));
+  postStatus = 200;
+  const failedP = (await db.query(`select * from processing where asset_id = $1 order by created_at desc limit 1`, [feed.asset_id])).rows[0];
+  ok('refused render: processing failed, feedback still approved and open', refused?.code === 'higgsfield_refused' && failedP.status === 'failed' && (await row('comments', c3)).status === 'open' && (await row('comments', c3)).decision === 'approved');
+
+  // Ambiguous outcomes keep the job and reservation; no automatic paid retry.
+  const usedBefore = (await usage(sdb)).seconds_this_month;
+  postStatus = 503;
+  const amb = await rejects(startHiggsfieldRevision(sdb, actor(TENG), feed.asset_id, null, 'c', APP, hf));
+  postStatus = 200;
+  const ambP = (await db.query(`select * from processing where asset_id = $1 order by created_at desc limit 1`, [feed.asset_id])).rows[0];
+  const ambJ = (await db.query(`select * from higgsfield_jobs where processing_id = $1`, [ambP.id])).rows[0];
+  ok('HTTP 5xx is an unknown outcome, not a refusal', amb?.code === 'unknown_outcome' && ambJ.status === 'submitting' && /unknown/i.test(ambJ.error));
+  ok('unknown outcome keeps the usage reservation and the processing open', (await usage(sdb)).seconds_this_month === usedBefore + 5 && ambP.status === 'executing' && /unclear/.test(ambP.message));
+  ok('unknown outcome never applies feedback', (await row('comments', c3)).status === 'open');
+  ok('a retry after a failed render builds on the last real version, not the failed placeholder', ambJ.parent_version_id === rv.version_id && ambP.reviewed_version_id === rv.version_id);
+  before = posts.length;
+  const ambAgain = await startHiggsfieldRevision(sdb, actor(TENG), feed.asset_id, null, 'c', APP, hf);
+  ok('pressing again after an unknown outcome does not pay again', ambAgain.repeated && posts.length === before);
+  postNoId = true;
+  const noId = await rejects(generate(sdb, actor(TENG), { prompt: 'No id please', format: 'square', duration: 4, idempotency_key: 'rev-noid-000001' }, 'c', APP, hf));
+  postNoId = false;
+  const noIdJ = (await db.query(`select * from higgsfield_jobs where idempotency_key = 'rev-noid-000001'`)).rows[0];
+  ok('2xx without a request id is an unknown outcome; version stays Rendering, not failed', noId?.code === 'unknown_outcome' && noIdJ.status === 'submitting' && (await row('versions', noIdJ.version_id)).render.state === 'rendering');
+
+  // The general (worker) Regenerate also freezes text and attribution.
+  const w = await finished('Worker path ad', 'square', 'rev-work-000001');
+  const c4 = await comment(w.asset_id, w.version_id, HENRY, 'Bigger logo'); await approve(c4);
+  const wp = (await sdb.rpc('feedback_process', { p_asset: w.asset_id, p_note: null, p_actor: TENG })).data;
+  ok('Regenerate (worker) stores a frozen snapshot too', wp.feedback_snapshot?.[0]?.body === 'Bigger logo' && wp.feedback_snapshot[0].author === HENRY && wp.engine === 'worker');
+  ok('regenerate start is server-only (not callable from the Data API)', !!(await rejects(db.exec(`select set_config('request.jwt.claims','{"sub":"${TENG}","role":"authenticated"}',false); set role authenticated; select public.higgsfield_revision_start('${w.asset_id}', null, null);`))));
+  await db.exec(`reset role; select set_config('request.jwt.claims','',false)`);
+  ok('voice-only feedback cannot steer a render on its own', !!(await rejects(Promise.resolve().then(() => revisionPrompt('p', [{ body: 'Voice note' }], null)))));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
