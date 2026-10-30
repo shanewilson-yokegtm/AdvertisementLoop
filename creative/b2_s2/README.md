@@ -8,3 +8,6 @@ From v2 the artboard markup lives here as plain HTML so the revision worker can 
 
 v2 (revision job 6a92b342, review c292d398): middle cut from 4 named cards to 3 face + title cards, bigger "0 sent",
 bottom copy cut to 7 words.
+
+v3 (revision job a7389ada, review cf18fa10): headline "You connected on LinkedIn. They accepted. Now what?" (dropped "Incredible teamwork."),
+bottom line "Yoke follows up for you, automatically."
