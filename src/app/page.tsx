@@ -10,7 +10,7 @@ import { statusChip, renderChip } from '@/components/Chips';
 import { radioKeys, tab } from '@/lib/radio';
 
 type Item = { a: Asset; v: Version; status: 'approved' | 'changes' | 'pending' };
-type View = 'all' | 'feedback' | 'approved';
+type View = 'all' | 'review' | 'feedback' | 'approved';
 const fmt = (f: string) => FORMATS[f]?.label || f;
 
 const SearchIcon = () => <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" strokeLinecap="round" /></svg>;
@@ -36,9 +36,11 @@ export default function Library() {
     .sort((x, y) => +new Date(y.v.created_at) - +new Date(x.v.created_at));
   const live = items.filter(x => !x.a.archived), arch = items.filter(x => x.a.archived);
   const ownerOf = (x: Item) => who(x.a.owner_id, x.a.legacy_creator);
-  const counts = { all: live.length, feedback: live.filter(x => pendingFor(x.a.id) > 0).length, approved: live.filter(x => x.status === 'approved').length };
+  // Needs review: the latest version has no approve / changes-requested decision yet (archived ads are already excluded).
+  const inView = (x: Item, k: View) => k === 'all' || (k === 'review' ? x.status === 'pending' : k === 'feedback' ? pendingFor(x.a.id) > 0 : x.status === 'approved');
+  const counts = { all: live.length, review: live.filter(x => x.status === 'pending').length, feedback: live.filter(x => pendingFor(x.a.id) > 0).length, approved: live.filter(x => x.status === 'approved').length };
   const needle = q.trim().toLowerCase();
-  const shown = live.filter(x => (view === 'all' || (view === 'feedback' ? pendingFor(x.a.id) > 0 : x.status === 'approved'))
+  const shown = live.filter(x => inView(x, view)
     && (!needle || x.a.concept_name.toLowerCase().includes(needle) || ownerOf(x).toLowerCase().includes(needle)));
   const urls = useSigned(items.flatMap(x => [x.v.poster_path || (x.v.content_type?.startsWith('image/') ? x.v.file_path : null)]));
   const download = async ({ a, v }: Item) => {
@@ -63,7 +65,7 @@ export default function Library() {
         <button type="button" className="btn small" aria-label={`Download ${title}, ${frameLabel(v, a.format)}`} onClick={() => void download(x)}>Download</button></div> : null}
     </article>; };
   const err = assets.err || versions.err;
-  const VIEWS: [View, string][] = [['all', 'All'], ['feedback', 'Feedback for you'], ['approved', 'Approved']];
+  const VIEWS: [View, string][] = [['all', 'All'], ['review', 'Needs review'], ['feedback', 'Feedback for you'], ['approved', 'Approved']];
   return <>
     <div className="head"><h1>Library</h1>
       {can(member, 'creator') ? <button className="btn ghost" onClick={() => setUp(true)}>Upload</button> : null}</div>
@@ -78,7 +80,7 @@ export default function Library() {
     {view === 'feedback' ? <p className="hint" style={{ marginTop: -12, marginBottom: 20 }}>{scope === 'all' && isAdmin ? 'Every owner’s feedback waiting for a decision. Deciding keeps them as owner.' : 'Ads you own with feedback waiting for your approve or reject.'}</p> : null}
     {!assets.ready ? <div className="empty"><span className="muted">Loading</span></div>
       : !live.length ? <div className="empty"><h2>No ads yet</h2><span className="muted">Ads you make land here for the team to review.</span><Link className="btn primary" href="/create">Create an ad</Link></div>
-      : !shown.length ? <div className="empty"><span className="muted">{needle ? `Nothing matches “${q.trim()}”` : view === 'feedback' ? 'No feedback waiting on you' : view === 'approved' ? 'Nothing approved yet' : 'Nothing here'}</span></div>
+      : !shown.length ? <div className="empty"><span className="muted">{needle ? `Nothing matches “${q.trim()}”` : view === 'review' ? 'Nothing waiting for review' : view === 'feedback' ? 'No feedback waiting on you' : view === 'approved' ? 'Nothing approved yet' : 'Nothing here'}</span></div>
       : <div className="grid">{shown.map(card)}</div>}
     {arch.length ? <details className="disc" style={{ marginTop: 40 }}><summary>Rejected and archived<span className="muted">{arch.length}</span></summary>
       <div className="inner"><div className="grid">{arch.map(card)}</div></div></details> : null}

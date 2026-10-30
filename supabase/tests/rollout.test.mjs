@@ -451,7 +451,9 @@ test('Library: one card per asset; same titles are never merged; counts, links a
   assert.match(cards().find(c => c.querySelector('a').getAttribute('href') === '/a/b1').querySelector('.sub').textContent, /Teng · 9:16/, 'owner and format on each card');
   const pick = label => [...document.querySelectorAll('[role=radio]')].find(b => b.textContent.startsWith(label));
   const views = [...document.querySelectorAll('[role=radiogroup][aria-label="Show"] [role=radio]')].map(b => b.textContent);
-  assert.deepEqual(views, ['All4', 'Feedback for you0', 'Approved2'], 'three views, not a wall of status pills');
+  assert.deepEqual(views, ['All4', 'Needs review1', 'Feedback for you0', 'Approved2'], 'four views in this order, not a wall of status pills');
+  await act(async () => pick('Needs review').click());
+  assert.deepEqual(hrefs(), ['/a/b2'], 'only live ads whose latest version has no decision: not approved, changes-requested or archived');
   await act(async () => pick('Approved').click());
   assert.deepEqual(hrefs(), ['/a/a1', '/a/a2']);
   await act(async () => { [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Download Clay: Credit math, 9:16').click(); await new Promise(r => setTimeout(r, 0)); });
