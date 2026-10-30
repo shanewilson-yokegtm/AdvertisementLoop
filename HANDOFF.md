@@ -21,7 +21,7 @@ Shane's request (8:28pm): "there is only feedback, no comments AND feedback. I g
 Two open items still wait on that ad: the 22:53 fuse/explode note on v3, and the 03:26 UTC "hand is creepy, burst pipe, rainbow collapses" note on v4.
 
 **Done locally (written; tests passed before the interruption):**
-1. Migration `supabase/migrations/20261030040000_feedback_approve_process.sql` (**not applied yet**):
+1. Migration `supabase/migrations/20261030033828_feedback_approve_process.sql` (applied 2026-10-30 03:38 UTC):
    - Adds `comments.decision` ('approved' or null), `decided_by` and `decided_at`; the guard allows those columns to change.
    - `feedback_decide(p_comment, p_decision approved|rejected|undecided, p_reason, p_actor)`:
      - Only the owner or an admin can call it.
