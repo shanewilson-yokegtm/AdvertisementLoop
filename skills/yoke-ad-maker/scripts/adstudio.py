@@ -57,9 +57,9 @@ def image_size(path):
 
 
 def api(method, route, body=None):
-    base, tok = os.environ.get('AD_STUDIO_API', '').rstrip('/'), os.environ.get('AD_STUDIO_TOKEN', '')
+    base, tok = os.environ.get('AD_STUDIO_API', 'https://advertisementloop-eight.vercel.app/api/v1').rstrip('/'), os.environ.get('AD_STUDIO_TOKEN', '')
     if not base or not tok:
-        fail('not_configured', 'Set AD_STUDIO_API and AD_STUDIO_TOKEN (Ad Studio > Connect Claude). Without them, use: adstudio.py handoff')
+        fail('not_configured', 'Set AD_STUDIO_TOKEN (your personal token from Ad Studio > Connect Claude). Without them, use: adstudio.py handoff')
     req = urllib.request.Request(f'{base}/{route}', method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={'authorization': f'Bearer {tok}', 'content-type': 'application/json', 'accept': 'application/json'})
     try:

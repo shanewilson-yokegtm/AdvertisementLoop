@@ -1,0 +1,6 @@
+{
+  "name": "ad-builder",
+  "version": "0.2.0",
+  "description": "Make Yoke ads in Yoke Ad Studio: static, infographic video, or a real Higgsfield (Seedance 2.5) render through the Studio, saved as versions for review.",
+  "author": { "name": "Shane Wilson", "email": "shane.wilson@yokegtm.com" }
+}
