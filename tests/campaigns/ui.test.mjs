@@ -40,5 +40,5 @@ test('campaign screen preserves permission gates, data states, filters and exact
 
 // Optional local visual review: no public demo route, credentials or production rows.
 if(process.env.CAMPAIGN_PREVIEW_HTML){
-  writeFileSync(process.env.CAMPAIGN_PREVIEW_HTML,'<!doctype html><html><meta name="viewport" content="width=device-width"><title>Campaign screen · local fixture</title><style>'+readFileSync(path.join(rootDir,'src/app/globals.css'),'utf8')+'</style><body><main class="wrap"><p class="muted">LOCAL DESIGN FIXTURE · No live account data</p>'+renderToStaticMarkup(React.createElement(CampaignView,props))+'</main></body></html>');
+  writeFileSync(process.env.CAMPAIGN_PREVIEW_HTML,'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Campaign screen · local fixture</title><style>'+readFileSync(path.join(rootDir,'src/app/globals.css'),'utf8')+'</style><body><main class="wrap"><p class="muted">LOCAL DESIGN FIXTURE · No live account data</p>'+renderToStaticMarkup(React.createElement(CampaignView,props))+'</main></body></html>');
 }

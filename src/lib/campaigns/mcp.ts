@@ -1,4 +1,4 @@
-// Register this on Ad Studio's per-person authenticated MCP server after its OAuth branch is merged.
+// Registered on Ad Studio's per-person authenticated MCP server.
 // Auth is supplied by that server, never inferred from tool arguments. No second shared credential.
 import * as z from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -8,11 +8,13 @@ import { handleCampaign } from '../server/campaign-api';
 import { ApiError } from '../server/api';
 
 type Registry = { registerTool: (name: string, config: any, callback: (args: any) => Promise<any>) => unknown };
+export const CAMPAIGN_TOOL_NAMES = ['campaign_playbook','campaign_list','campaign_create','campaign_get','campaign_command','campaign_audit','campaign_report','campaign_closeout','campaign_due'] as const;
 export function registerCampaignTools(server: Registry, db: SupabaseClient, actor: Actor) {
   const id = z.string().regex(/^yc_[a-f0-9]{24}$/);
   const reg = (name: string, description: string, schema: z.ZodRawShape, write: boolean, route: (a: any) => { method: string; path: string[]; body?: unknown; query?: Record<string,string> }) => {
-    server.registerTool(name, { description, inputSchema: schema,
-      annotations: { readOnlyHint: !write, destructiveHint: false, openWorldHint: false } }, async args => {
+    const title = name.replaceAll('_',' ').replace(/^c/,'C');
+    server.registerTool(name, { title, description, inputSchema: schema,
+      annotations: { title, readOnlyHint: !write, destructiveHint: false, openWorldHint: false } }, async args => {
       try {
         const r = route(args); const data = await handleCampaign(db, actor, r.method, r.path, r.body || null, new URLSearchParams(r.query));
         return { content: [{ type: 'text', text: JSON.stringify(data) }] };

@@ -122,6 +122,9 @@ test('real Postgres + API: shared edits, exact assets, CAS, replay, imports and 
   assert.equal(saved.state.ownerId,CREATOR);
   await assert.rejects(send(creator,1,'stale-save-0001',{type:'save_brief',brief:fixture}),/changed/);
   await assert.rejects(send(creator,2,'bad-approve-0001',{type:'approve',fingerprint:saved.fingerprint}),/approver/);
+  await db.exec("update reviews set status='changes' where version_id='fixture-asset_v1'");
+  await assert.rejects(send(admin,2,'unready-approve-0001',{type:'approve',fingerprint:saved.fingerprint}),/approved, ready/);
+  await db.exec("update reviews set status='approved' where version_id='fixture-asset_v1'");
   const approved=await send(admin,2,'approve-plan-0001',{type:'approve',fingerprint:saved.fingerprint});
   assert.equal(approved.state.status,'approved');
   assert.equal((await send(admin,2,'approve-plan-0001',{type:'approve',fingerprint:saved.fingerprint})).repeated,true);

@@ -1,6 +1,6 @@
 # Tool and HTTP interface
 
-MCP registration is implemented by `src/lib/campaigns/mcp.ts` (`registerCampaignTools`). It needs to be registered on the per-member authenticated Ad Studio MCP server; this scaffold deliberately does not ship a second shared-token endpoint. See `docs/campaigns/CLAUDE-HANDOFF.md`.
+MCP registration is implemented by `src/lib/campaigns/mcp.ts` (`registerCampaignTools`). It is registered on the existing per-member authenticated Ad Studio MCP server in source; deployment and tool discovery still need verification. This scaffold does not ship a second shared-token endpoint. See `docs/campaigns/CLAUDE-HANDOFF.md`.
 
 HTTP API (personal-token clients): `/api/v1/campaigns`. Set `AD_STUDIO_API` to the selected Yoke environment’s `/api/v1` and keep `AD_STUDIO_TOKEN` in the client’s secret environment. The token belongs to a person; it is neither a platform account key nor the Supabase service key. Browser sessions use `/api/campaigns` with same-origin requests instead.
 
