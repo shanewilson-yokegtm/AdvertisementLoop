@@ -244,5 +244,30 @@ try { await db.exec(`update versions set file_path='ast_hf/other.mp4' where id='
 try { await db.exec(`update versions set revision_note='x', file_path='ast_hf/v1.mp4' where id='ast_teng_v1'`); ok('ready versions stay immutable for the server', false); } catch { ok('ready versions stay immutable for the server', true); }
 await denied('members cannot create Higgsfield jobs directly', HENRY, `insert into higgsfield_jobs(asset_id,version_id,requested_by,idempotency_key,prompt,duration,aspect_ratio) values ('ast_hf','ast_hf_v1','${HENRY}','k','p',9,'9:16')`);
 
+// ---------- one kind of feedback: approve / reject, then Process all approved ----------
+await as(TENG, `insert into assets(id,concept_name,kind,format) values ('ast_fb','FB','static','square'); insert into versions(id,asset_id,version,file_path,content_type) values ('x','ast_fb',0,'ast_fb/1.png','image/png')`);
+await as(HENRY, `insert into comments(asset_id,version_id,body) values ('ast_fb','ast_fb_v1','make the logo bigger'),('ast_fb','ast_fb_v1','change the color'),('ast_fb','ast_fb_v1','undecided one')`);
+const fb = async b => (await val(`select id from comments where asset_id='ast_fb' and body='${b}'`))[0].id;
+const [logo, color, und] = [await fb('make the logo bigger'), await fb('change the color'), await fb('undecided one')];
+await denied('a non-owner cannot approve feedback', HENRY, `select feedback_decide('${logo}','approved')`, /owner or an admin/);
+await allowed('owner approves feedback', TENG, `select feedback_decide('${logo}','approved')`);
+await allowed('owner rejects feedback', TENG, `select feedback_decide('${color}','rejected','off brand')`);
+ok('rejected feedback is closed with the reason', (await val(`select status, resolution_note from comments where id='${color}'`))[0].resolution_note === 'off brand');
+await as(TENG, `insert into reviews(version_id,status) values ('ast_fb_v1','approved')`).catch(() => {});
+// new feedback arrives after earlier decisions and is approved too: it must be included
+await as(HENRY, `insert into comments(asset_id,version_id,body) values ('ast_fb','ast_fb_v1','late but approved')`);
+const lateFb = await fb('late but approved');
+await as(TENG, `select feedback_decide('${lateFb}','approved')`);
+await denied('Process needs something approved', HENRY, `select feedback_process('ast_fb')`, /owner or an admin/);
+await allowed('owner presses Process', TENG, `select feedback_process('ast_fb', 'keep it simple')`);
+const pr = (await val(`select * from processing where asset_id='ast_fb' and status='approved'`))[0];
+ok('Process takes every approved item, including late ones; not rejected or undecided', pr && pr.comment_ids.length === 2 && pr.comment_ids.includes(logo) && pr.comment_ids.includes(lateFb) && !pr.comment_ids.includes(und) && !pr.comment_ids.includes(color));
+ok('note goes along as instructions', pr.instructions === 'keep it simple');
+ok('a revision job is queued for the worker', (await val(`select count(*)::int n from revision_jobs where processing_id='${pr.id}' and state='queued'`))[0].n === 1);
+await denied('approved feedback in progress cannot be changed', TENG, `select feedback_decide('${logo}','rejected')`, /already going/);
+await denied('cannot Process twice while a version is being made', TENG, `select feedback_process('ast_fb')`, /already being made/);
+await allowed('undo a rejection', TENG, `select feedback_decide('${color}','undecided')`);
+ok('undone feedback is open again', (await val(`select status from comments where id='${color}'`))[0].status === 'open');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

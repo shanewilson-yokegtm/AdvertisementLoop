@@ -48,7 +48,7 @@ function reviewFixture(initial = [v1], query = '') {
     '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }) },
     '@/components/ChangeLog': { __esModule: true, default: () => null },
     '@/components/Higgsfield': { useHiggsfieldPoll: () => {} },
-    '@/lib/supabase/browser': { sb: () => ({ from: table => ({ upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
+    '@/lib/supabase/browser': { sb: () => ({ from: table => ({ insert: async row => { writes.push({ table, ...row }); return { error: null }; }, upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
     '@/components/Shell': { useApp: () => ({ member, toast: () => {} }) },
     '@/components/Media': { Player: ({ v }) => React.createElement('div', { id: 'selected-media' }, v.id) },
     '@/components/Chips': { statusChip: () => null, renderChip: () => null },
@@ -65,7 +65,7 @@ test('realtime upload does not move the media or approval target; explicit selec
   f.rows.versions = [v1, v2]; await act(f.render);
   assert.equal(document.getElementById('selected-media').textContent, v1.id);
   assert.match(document.body.textContent, /newer version is available/);
-  await act(async () => button('Approve').click());
+  await act(async () => button('Approve v1').click());
   assert.equal(f.writes[0].version_id, v1.id);
   await act(async () => button('v2').click());
   assert.equal(document.getElementById('selected-media').textContent, v2.id);
@@ -76,24 +76,25 @@ test('a shared link opens its exact version and an unknown version never falls b
   let f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
   assert.equal(document.getElementById('selected-media').textContent, v1.id); await finish();
   f = reviewFixture([v1, v2], 'v=missing'); await mount(f.Page);
-  assert.match(document.body.textContent, /Version not found/); assert.equal(button('Approve'), undefined); await finish();
+  assert.match(document.body.textContent, /Version not found/); assert.equal(button('Approve v1'), undefined); await finish();
 });
 
 test('pending media cannot be approved in the UI', async () => {
   const f = reviewFixture([{ ...v1, file_path: null, render: { state: 'pending' } }]); await mount(f.Page);
-  assert.equal(button('Approve').disabled, true); await act(async () => button('Approve').click());
+  assert.equal(button('Approve v1').disabled, true); await act(async () => button('Approve v1').click());
   assert.equal(f.writes.length, 0); await finish();
 });
 
-test('request changes needs feedback, then records it on the version being reviewed', async () => {
+test('one feedback box: needs text, then saves feedback on the version being viewed', async () => {
   const f = reviewFixture(); await mount(f.Page);
-  assert.equal(button('Request changes').disabled, true);
-  const box = document.getElementById('rev-note');
+  assert.equal(button('Request changes'), undefined, 'no separate request-changes flow');
+  assert.equal(button('Add feedback').disabled, true);
+  const box = document.getElementById('cmt');
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
   await act(async () => { setter.call(box, 'Make the logo bigger'); box.dispatchEvent(new window.Event('input', { bubbles: true })); });
-  assert.equal(button('Request changes').disabled, false);
-  await act(async () => button('Request changes').click());
-  assert.deepEqual(f.writes.map(w => [w.table, w.version_id, w.status, w.note]), [['reviews', v1.id, 'changes', 'Make the logo bigger']]);
+  assert.equal(button('Add feedback').disabled, false);
+  await act(async () => { box.form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); await act(async () => {});
+  assert.deepEqual(f.writes.map(w => [w.table, w.version_id, w.body]), [['comments', v1.id, 'Make the logo bigger']]);
   await finish();
 });
 
@@ -123,72 +124,46 @@ test('the owner sees Process feedback and can revert an older version', async ()
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-// ---------- Owner feedback: Accept / Ignore, then Make next version (real component) ----------
+// ---------- Owner feedback: Approve / Reject each item, then Process all approved (real component) ----------
 function processFixture(proc, comments) {
   const calls = [];
-  const started = { id: 'p-new', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: comments.filter(c => c.status === 'open').map(c => c.id), status: 'reviewing', proposal: {}, decisions: [], rev: 0, history: [] };
   const Panel = source('src/components/Process.tsx', {
-    '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => {
-      calls.push({ fn, args });
-      if (fn === 'processing_start') return { data: started, error: null };
-      if (fn === 'processing_save_proposal') return { data: { ...(proc || started), proposal: args.p_proposal, rev: args.p_rev + 1 }, error: null };
-      return { data: { ...(proc || started), status: 'approved' }, error: null };
-    } }) },
+    '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
     '@/lib/data': { fmtDate: () => '', fmtSec: s => String(s) },
   }).default;
   const props = { a: asset, vs: [v1, v2], comments, proc, reload: () => {}, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, onOpen: () => {}, ownerName: 'Shane' };
   return { Panel: () => React.createElement(Panel, props), calls };
 }
 const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng', body: 'Shorter headline', status: 'open', created_at: '' };
-const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v2', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '' };
-const cLate = { id: 'c-late', asset_id: 'asset', version_id: 'asset_v2', author: 'henry', body: 'Late idea', status: 'open', created_at: '' };
-const reviewing = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-a', 'c-b'], processor: 'shane', started_via: 'claude', status: 'reviewing',
-  proposal: { draft: { decisions: [{ comment_id: 'c-a', decision: 'apply' }], instructions: 'From Claude' } },
-  decisions: [], instructions: null, result_version_id: null, message: null, rev: 3, history: [], created_at: '' };
+const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '', decision: 'approved' };
 const radio = (i, label) => [...document.querySelectorAll('[role=radio]')].filter(b => b.textContent === label)[i];
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
 
-test('Make next version is off until something is accepted; clicking Accept starts and saves the choice', async () => {
-  const f = processFixture(null, [cA, cB]); await mount(f.Panel);
-  assert.equal(button('Make next version').disabled, true);
-  assert.equal(f.calls.length, 0, 'opening the ad changes nothing');
-  await act(async () => radio(0, 'Accept').click()); await flush();
-  assert.deepEqual(f.calls.map(c => c.fn), ['processing_start', 'processing_save_proposal']);
-  assert.deepEqual(f.calls[1].args.p_proposal.draft.decisions, [{ comment_id: 'c-a', decision: 'apply' }]);
-  assert.equal(button('Make next version').disabled, false);
-  assert.match(document.body.textContent, /1 accepted · 0 ignored · 1 not decided/);
-  await finish();
-});
-
-test('ignoring everything offers Close ignored instead of making a version', async () => {
+test('Approve and Reject save right away on the item', async () => {
   const f = processFixture(null, [cA]); await mount(f.Panel);
-  await act(async () => radio(0, 'Ignore').click()); await flush();
-  assert.ok(button('Close ignored') && !button('Close ignored').disabled);
+  assert.equal(button('Process approved feedback').disabled, true);
+  assert.equal(f.calls.length, 0, 'opening the ad changes nothing');
+  await act(async () => radio(0, 'Approve').click()); await flush();
+  await act(async () => radio(0, 'Reject').click()); await flush();
+  assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_comment, c.args.p_decision]), [['feedback_decide', 'c-a', 'approved'], ['feedback_decide', 'c-a', 'rejected']]);
   await finish();
 });
 
-test('choices made in Claude show up in the app', async () => {
-  const f = processFixture(reviewing, [cA, cB, cLate]); await mount(f.Panel);
-  assert.equal(radio(0, 'Accept').getAttribute('aria-checked'), 'true');
-  assert.equal(document.getElementById('proc-instr').value, 'From Claude');
-  assert.match(document.body.textContent, /1 newer comment came in after you started choosing/);
+test('Process sends everything approved (server collects it), not a snapshot', async () => {
+  const f = processFixture(null, [cA, cB]); await mount(f.Panel);
+  assert.match(document.body.textContent, /1 approved · 1 not decided/);
+  assert.equal(radio(0, 'Approve').getAttribute('aria-checked'), 'false');
+  assert.equal(radio(1, 'Approve').getAttribute('aria-checked'), 'true');
+  await act(async () => button('Process approved feedback').click()); await flush();
+  assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_asset]), [['feedback_process', 'asset']]);
   await finish();
 });
 
-test('Make next version sends only accepted and ignored comments from this round', async () => {
-  const f = processFixture(reviewing, [cA, cB, cLate]); await mount(f.Panel);
-  await act(async () => radio(1, 'Ignore').click()); await flush();
-  await act(async () => button('Make next version').click()); await flush();
-  const call = f.calls.find(c => c.fn === 'processing_approve');
-  assert.equal(call.args.p_queue_worker, true);
-  assert.deepEqual(call.args.p_decisions.map(d => [d.comment_id, d.decision]).sort(), [['c-a', 'apply'], ['c-b', 'dismiss']]);
-  assert.ok(!JSON.stringify(call.args).includes('c-late'), 'late comment not included');
-  await finish();
-});
-
-test('after sending, the owner sees it queued and can cancel before Claude starts', async () => {
-  const f = processFixture({ ...reviewing, status: 'approved', decisions: [{ comment_id: 'c-a', decision: 'apply' }] }, [cA, cB]); await mount(f.Panel);
+test('after Process, the owner sees it queued and can cancel before Claude starts', async () => {
+  const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'approved', decisions: [{ comment_id: 'c-b', decision: 'apply' }], rev: 4, history: [] };
+  const f = processFixture(proc, [cA, cB]); await mount(f.Panel);
   assert.match(document.body.textContent, /v3 arrives within the hour/);
+  assert.match(document.body.textContent, /Feedback to decide · 1/, 'item already in the version is not shown again');
   await act(async () => button('Cancel').click()); await flush();
   assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();

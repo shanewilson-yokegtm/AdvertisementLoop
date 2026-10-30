@@ -115,6 +115,8 @@ def main():
     x.add_argument('--parent'); x.add_argument('--note'); x.add_argument('--meta', default='{}'); x.add_argument('--key'); x.add_argument('--review')
     x = sp.add_parser('save-pending'); x.add_argument('asset'); x.add_argument('--note', required=True); x.add_argument('--meta', default='{}'); x.add_argument('--key')
     x = sp.add_parser('comment'); x.add_argument('asset'); x.add_argument('--version', required=True); x.add_argument('--text', required=True); x.add_argument('--at', type=float)
+    x = sp.add_parser('decide'); x.add_argument('asset'); x.add_argument('feedback'); x.add_argument('decision', choices=['approved', 'rejected', 'undecided']); x.add_argument('--reason')
+    x = sp.add_parser('process-approved'); x.add_argument('asset'); x.add_argument('--note')
     x = sp.add_parser('process'); x.add_argument('asset')
     x = sp.add_parser('propose'); x.add_argument('review'); x.add_argument('--rev', type=int, required=True); x.add_argument('--json', required=True)
     x = sp.add_parser('approve'); x.add_argument('review'); x.add_argument('--rev', type=int, required=True); x.add_argument('--decisions', required=True)
@@ -147,6 +149,8 @@ def main():
     elif a.cmd == 'save-pending':
         r = api('POST', f'assets/{a.asset}/versions', {**json.loads(a.meta), 'render_state': 'pending', 'render_note': a.note, 'idempotency_key': a.key or f'pending-{uuid.uuid4()}'})
     elif a.cmd == 'comment': r = api('POST', f'assets/{a.asset}/comments', {'version_id': a.version, 'body': a.text, 'at_sec': a.at})
+    elif a.cmd == 'decide': r = api('POST', f'assets/{a.asset}/feedback/{a.feedback}/decide', {'decision': a.decision, 'reason': a.reason})
+    elif a.cmd == 'process-approved': r = api('POST', f'assets/{a.asset}/process-approved', {'note': a.note})
     elif a.cmd == 'process': r = api('POST', f'assets/{a.asset}/processing', {})
     elif a.cmd == 'propose': r = api('POST', f'processing/{a.review}/proposal', {'rev': a.rev, 'proposal': json.loads(a.json)})
     elif a.cmd == 'approve': r = api('POST', f'processing/{a.review}/approve', {'rev': a.rev, 'decisions': json.loads(a.decisions), 'instructions': a.instructions, 'queue_worker': a.worker})

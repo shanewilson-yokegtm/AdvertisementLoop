@@ -76,14 +76,18 @@ python3 scripts/adstudio.py share <asset_id> --version <version_id> --channel <c
 
 Feedback goes to the ad's owner. Nothing runs automatically: comments, Slack replies and reactions never edit an ad or enter anyone's chat.
 
-1. `python3 scripts/adstudio.py inbox` lists your ads with feedback to process. Shane can add `--all` for everyone's.
-2. `python3 scripts/adstudio.py process <asset_id>` starts or resumes the shared review. It's the same record the app's **Process feedback** button uses, so work started in one continues in the other. It makes no edits.
-3. `get <asset_id>` shows the reviewed version, the latest version, media, source, every comment (author, time, version, timecode, Slack link) and the saved proposal and decisions.
-4. Present a short proposal: what's compatible, what conflicts, and what you'd change. Save it with `propose <review_id> --rev N --json '{"summary":"...","items":[{"comment_ids":[...],"kind":"compatible|conflict","change":"..."}]}'`.
-5. Wait for the person to choose. "Apply Teng's headline, keep Henry's visual" is enough; don't ask again. Then record exactly that with `approve <review_id> --rev N --decisions '[{"comment_id":"...","decision":"apply|defer|dismiss","note":"..."}]' --instructions "..."`. Undecided or deferred items stay pending.
-6. Make the change, then `save <asset_id> --file ... --parent <reviewed_version_id> --review <review_id> --note "<what changed>"`.
-7. `complete <review_id> --rev N --version <new_version_id>` resolves only the applied and dismissed comments. Feedback that arrived after the review started stays pending.
-8. If it can't be finished, run `status <review_id> --rev N --status failed --message "..."`. The last good version and all feedback stay as they were.
+There is one kind of feedback. The owner approves or rejects each item; **Process** sends every approved, still-open
+item on the ad (from any version, whenever it arrived) into the next version. Undecided items wait.
+
+1. `python3 scripts/adstudio.py inbox` lists your ads with feedback waiting. Shane can add `--all` for everyone's.
+2. `get <asset_id>` shows every feedback item (author, time, version, timecode, Slack link, `decision`) and the latest version.
+3. Summarize the open items and suggest which to approve. Wait for the person to choose; "approve Teng's, reject Henry's" is enough.
+4. Record each choice: `decide <asset_id> <feedback_id> approved|rejected|undecided [--reason "..."]` (same as the app's Approve / Reject).
+5. `process-approved <asset_id> [--note "anything else"]` queues the next version with all approved items (same as the app's **Process approved feedback**). The revision worker makes it within the hour.
+6. If you're making the version yourself instead: `get` shows the new review id and its `rev`. Make the change, then
+   `save <asset_id> --file ... --parent <latest_version_id> --review <review_id> --note "<what changed, item by item>"` and
+   `complete <review_id> --rev N --version <new_version_id>`. Every approved item must be addressed in the new version.
+7. If it can't be finished: `status <review_id> --rev N --status failed --message "..."`. The last good version stays and the feedback stays approved.
 
 If the helper reports `timeout_unknown_outcome`, the step may have gone through: run `get` and check before repeating it.
 
@@ -91,7 +95,7 @@ If the helper reports `timeout_unknown_outcome`, the step may have gone through:
 
 Revert: `revert <asset_id> --from <old_version_id> --latest <current_latest_id>` makes a new version from the old one. History stays.
 
-To start the work in the app instead, press **Execute changes** there. Ad Studio's revision worker then makes the version, within the hour.
+In the app the same flow is Approve / Reject on each item, then **Process approved feedback**.
 
 ## Wrapping up
 

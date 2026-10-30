@@ -195,6 +195,13 @@ export async function handle(db: SupabaseClient, a: Actor, method: string, parts
       if (r.status !== 200) throw new ApiError(r.status, (r.body as any).error || 'error', (r.body as any).message || 'Share failed');
       return r.body;
     }
+    // One kind of feedback: approve/reject each item, then process every approved item.
+    if (method === 'POST' && r2 === 'feedback' && parts[3] && parts[4] === 'decide') {
+      return ok(await db.rpc('feedback_decide', { p_comment: parts[3], p_decision: String(body?.decision || ''), p_reason: body?.reason || null, p_actor: a.user_id }));
+    }
+    if (method === 'POST' && r2 === 'process-approved') {
+      return ok(await db.rpc('feedback_process', { p_asset: assetId, p_note: body?.note || null, p_actor: a.user_id }));
+    }
     if (method === 'POST' && r2 === 'processing') {
       return ok(await db.rpc('processing_start', { p_asset: assetId, p_via: 'claude', p_actor: a.user_id }));
     }
