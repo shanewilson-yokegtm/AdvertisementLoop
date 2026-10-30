@@ -3,7 +3,7 @@
 import { NextResponse } from 'next/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { serviceClient } from '@/lib/supabase/server';
-import { McpAuthError, challenge, mcpActor, mcpConfig, requireLiveSession, verifyMcpToken } from '@/lib/server/mcp-auth';
+import { McpAuthError, challenge, mcpActor, mcpConfig, originAllowed, requireLiveSession, verifyMcpToken } from '@/lib/server/mcp-auth';
 import { buildMcpServer } from '@/lib/server/mcp-tools';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +13,8 @@ async function serve(req: Request) {
   const origin = new URL(req.url).origin;
   const cfg = mcpConfig(process.env, origin);
   if (!cfg || !process.env.SUPABASE_SERVICE_ROLE_KEY) return NextResponse.json({ error: 'connector_not_enabled', message: 'The Ad Studio Claude connector is not switched on yet.' }, { status: 503 });
+  // Origin first (before any token work): browsers may only call from an allowlisted origin. No CORS headers are sent.
+  if (!originAllowed(req.headers.get('origin'), cfg)) return NextResponse.json({ error: 'forbidden_origin', message: 'This origin may not call the Ad Studio MCP endpoint.' }, { status: 403 });
   let actor;
   const db = serviceClient();
   try {

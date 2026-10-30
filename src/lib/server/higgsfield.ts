@@ -238,6 +238,12 @@ export async function startHiggsfieldRevision(db: SupabaseClient, a: Actor, asse
   const p = ok(await db.rpc('higgsfield_revision_start', { p_asset: assetId, p_note: note, p_actor: a.user_id })) as any;
   const existing = ok(await db.from('higgsfield_jobs').select('*').eq('processing_id', p.id).maybeSingle()) as any;
   if (existing) return { processing_id: p.id, job: existing, asset_id: assetId, version_id: existing.version_id, repeated: true };
+  // Only the caller that wins the claim creates the version and pays. Everyone else reports "already starting" and
+  // never generates or closes the run, so a losing double click can't fail the winner's render.
+  if (!ok(await db.rpc('higgsfield_revision_claim', { p_processing: p.id }))) {
+    const now = ok(await db.from('higgsfield_jobs').select('*').eq('processing_id', p.id).maybeSingle()) as any;
+    return { processing_id: p.id, job: now ?? null, asset_id: assetId, version_id: now?.version_id ?? null, repeated: true, starting: !now };
+  }
   const parent = ok(await db.from('versions').select('id, spec').eq('id', p.reviewed_version_id).single()) as any;
   const spec = parent.spec || {};
   const format = RATIO_FORMAT[spec.aspect_ratio];

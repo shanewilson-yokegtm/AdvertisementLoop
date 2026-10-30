@@ -70,12 +70,12 @@ export async function handle(db: SupabaseClient, a: Actor, method: string, parts
     if (method === 'GET' && r1 === 'usage') return { ...(await hf.usage(db)), default_seconds: hf.DEFAULT_SECONDS, min_seconds: hf.MIN_SECONDS, max_seconds: hf.MAX_SECONDS };
     if (method === 'POST' && r1 === 'generate') {
       const r = await hf.generate(db, a, { ...(body || {}), chat_id: null }, creds, appUrl);
-      return { asset_id: r.asset_id, version_id: r.version_id, job_id: r.job.id, status: r.job.status, repeated: r.repeated, link: link(r.asset_id, r.version_id) };
+      return { asset_id: r.asset_id, version_id: r.version_id, job_id: r.job?.id ?? null, status: r.job?.status ?? 'starting', repeated: r.repeated, link: link(r.asset_id, r.version_id) };
     }
     if (method === 'POST' && r1 === 'revise') {
       if (body?.person_confirmed !== true) throw new ApiError(400, 'invalid', 'Confirm the paid render with the person first (person_confirmed: true).');
       const r = await hf.startHiggsfieldRevision(db, a, String(body?.asset_id || ''), body?.note ? String(body.note).slice(0, 2000) : null, creds, appUrl);
-      return { processing_id: r.processing_id, asset_id: r.asset_id, version_id: r.version_id, job_id: r.job.id, status: r.job.status, repeated: r.repeated, link: link(r.asset_id, r.version_id) };
+      return { processing_id: r.processing_id, asset_id: r.asset_id, version_id: r.version_id, job_id: r.job?.id ?? null, status: r.job?.status ?? 'starting', repeated: r.repeated, link: link(r.asset_id, r.version_id) };
     }
     if (method === 'GET' && r1 === 'status') {
       const job = query.get('job') || '';

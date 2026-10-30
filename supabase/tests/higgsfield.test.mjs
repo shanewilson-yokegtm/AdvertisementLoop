@@ -264,6 +264,48 @@ ok('a truncated MP4 extended box header is safely ignored', mp4Info(new Uint8Arr
   const noIdJ = (await db.query(`select * from higgsfield_jobs where idempotency_key = 'rev-noid-000001'`)).rows[0];
   ok('2xx without a request id is an unknown outcome; version stays Rendering, not failed', noId?.code === 'unknown_outcome' && noIdJ.status === 'submitting' && (await row('versions', noIdJ.version_id)).render.state === 'rendering');
 
+  // Double click / two tabs: both callers get the same executing row before any job exists.
+  {
+    const dc = await finished('Double click ad', 'vertical', 'rev-dbl-0000001');
+    const cd = await comment(dc.asset_id, dc.version_id, HENRY, 'Add a coffee cup'); await approve(cd);
+    let gate; const held = new Promise(r => { gate = r; });
+    const slow = async (url, init) => { if (init?.method === 'POST') await held; return hf(url, init); };
+    before = posts.length;
+    const both = Promise.allSettled([startHiggsfieldRevision(sdb, actor(TENG), dc.asset_id, null, 'c', APP, slow), startHiggsfieldRevision(sdb, actor(SHANE), dc.asset_id, null, 'c', APP, slow)]);
+    await new Promise(r => setTimeout(r, 50)); gate();
+    const [a1, a2] = await both;
+    const runs = (await db.query(`select * from processing where asset_id = $1 and engine = 'higgsfield'`, [dc.asset_id])).rows;
+    const jobs = (await db.query(`select * from higgsfield_jobs where asset_id = $1 and processing_id is not null`, [dc.asset_id])).rows;
+    ok('double click: one processing row, one job, one paid submit', runs.length === 1 && jobs.length === 1 && posts.length === before + 1);
+    ok('double click: neither caller errors; one is told it is already starting', a1.status === 'fulfilled' && a2.status === 'fulfilled' && [a1.value, a2.value].filter(x => x.repeated).length === 1, `${a1.reason?.message || ''} ${a2.reason?.message || ''}`);
+    ok('double click: the losing caller never marks the winning run failed', runs[0].status === 'executing');
+    state = 'completed'; await refresh(sdb, jobs[0].id, 'c', hf); state = 'queued';
+    ok('double click: the winning render completes and applies the feedback', (await row('processing', runs[0].id)).status === 'done' && (await row('comments', cd)).status === 'applied');
+  }
+  // A claim whose holder died before inserting its job can be reclaimed, but only once and only when stale.
+  {
+    const sc = await finished('Stale claim ad', 'vertical', 'rev-stale-000001');
+    const cs = await comment(sc.asset_id, sc.version_id, HENRY, 'Brighter'); await approve(cs);
+    const p0 = (await sdb.rpc('higgsfield_revision_start', { p_asset: sc.asset_id, p_note: null, p_actor: TENG })).data;
+    const claim = async () => (await sdb.rpc('higgsfield_revision_claim', { p_processing: p0.id })).data;
+    ok('claim: first caller wins, second loses', (await claim()) === true && (await claim()) === false);
+    await db.query(`update processing set render_claimed_at = now() - interval '5 minutes' where id = $1`, [p0.id]);
+    const [r1, r2] = await Promise.all([claim(), claim()]);
+    ok('claim: a stale claim with no job is reclaimed by exactly one caller', [r1, r2].filter(Boolean).length === 1);
+    before = posts.length;
+    const resumed = await startHiggsfieldRevision(sdb, actor(TENG), sc.asset_id, null, 'c', APP, hf);
+    ok('claim: a fresh claim held by someone else means "already starting", nothing paid', resumed.repeated && resumed.job === null && posts.length === before);
+    const { handle } = load('src/lib/server/api.ts'); process.env.HF_CREDENTIALS = 'c';
+    const viaApi = await handle(sdb, actor(TENG), 'POST', ['higgsfield', 'revise'], { asset_id: sc.asset_id, person_confirmed: true }, new URLSearchParams(), APP);
+    delete process.env.HF_CREDENTIALS;
+    ok('claim: the API reports "starting" (no crash, no job id) while another caller holds the claim', viaApi.status === 'starting' && viaApi.job_id === null && viaApi.repeated && posts.length === before);
+    await db.query(`update processing set render_claimed_at = now() - interval '5 minutes' where id = $1`, [p0.id]);
+    const taken = await startHiggsfieldRevision(sdb, actor(TENG), sc.asset_id, null, 'c', APP, hf);
+    ok('claim: after the holder died, the next press renders once', !taken.repeated && posts.length === before + 1 && taken.processing_id === p0.id);
+    await db.query(`update processing set render_claimed_at = now() - interval '5 minutes' where id = $1`, [p0.id]);
+    ok('claim: never reclaimable once a job exists', (await claim()) === false);
+  }
+
   // The general (worker) Regenerate also freezes text and attribution.
   const w = await finished('Worker path ad', 'square', 'rev-work-000001');
   const c4 = await comment(w.asset_id, w.version_id, HENRY, 'Bigger logo'); await approve(c4);

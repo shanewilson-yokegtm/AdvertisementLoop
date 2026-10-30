@@ -101,7 +101,9 @@ Create an ad → **Higgsfield video**. Any creator can generate. Settings are fi
   real media frame: the feed preset renders 3:4, landscape renders 16:9.
 - **Regenerate in Higgsfield** (owner/admin): freezes the approved feedback, renders once on the newest finished
   version with its length/frame/sound, and marks the feedback applied only after the MP4 and version are saved.
-  A refused render fails the run and leaves the feedback approved; a repeated press never pays twice.
+  A refused render fails the run and leaves the feedback approved; a repeated press never pays twice: an atomic claim
+  (`higgsfield_revision_claim`) lets exactly one caller create the version and submit; a second press says
+  "already starting" and never closes the run. A claim is retaken only if stale (2 min) with no job.
 
 ## Claude connector setup (needs Shane's approval; nothing below is enabled by the code)
 
@@ -119,7 +121,8 @@ The connector is per person: each member signs in with their own Yoke account an
    OAuth tokens (registered client → the MCP URL; anything else → an audience nothing accepts). Browser sessions are
    unchanged.
 6. Vercel env (Production): `MCP_CONNECTOR_ENABLED=true`, `MCP_OAUTH_CLIENT_IDS=<client id>`,
-   `NEXT_PUBLIC_MCP_OAUTH_CLIENT_IDS=<client id>`, and `APP_URL` (already set). Redeploy.
+   `NEXT_PUBLIC_MCP_OAUTH_CLIENT_IDS=<client id>`, and `APP_URL` (already set). Redeploy. Leave `MCP_ALLOWED_ORIGINS`
+   unset unless a browser-based MCP client must call the endpoint; it takes exact `https://host` origins only.
 7. Claude › Organization settings › Connectors › Add › Custom › Web: URL `<APP_URL>/api/mcp`, **Use your own OAuth
    client**, client id from step 3, secret blank. Members then press **Connect** under Customize › Connectors.
    Suggested: set `higgsfield_generate`, `higgsfield_regenerate` and `post_to_slack` to **Ask** in tool permissions.
@@ -127,3 +130,6 @@ The connector is per person: each member signs in with their own Yoke account an
 Checks the endpoint makes on every call: ES256/RS256 signature from the project JWKS, issuer, audience = the MCP URL,
 registered client id, `role=authenticated`, the Supabase session still exists (Disconnect is immediate), and the
 member's current role. Discovery: `/.well-known/oauth-protected-resource/api/mcp` → Supabase Auth.
+Before any of that, a request carrying an `Origin` header must match the allowlist exactly (the app's own origin, plus
+`MCP_ALLOWED_ORIGINS`), or it gets 403 (MCP DNS-rebinding rule). Requests without `Origin` (Claude's servers) go on to
+the token checks. No CORS headers are sent.

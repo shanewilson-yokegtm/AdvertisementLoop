@@ -9,6 +9,7 @@ export type McpAuthConfig = {
   resource: string;        // https://<app>/api/mcp (RFC 8707 resource; the only accepted audience)
   clientIds: string[];     // registered connector client(s); empty = connector switched off
   metadataUrl: string;     // RFC 9728 protected resource metadata for this endpoint
+  allowedOrigins: string[]; // exact browser origins allowed to call /api/mcp (no wildcards)
 };
 
 export class McpAuthError extends Error {
@@ -21,7 +22,25 @@ export function mcpConfig(env: Record<string, string | undefined> = process.env,
   const app = (env.APP_URL || origin || '').replace(/\/+$/, '');
   const clientIds = (env.MCP_OAUTH_CLIENT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!supabaseUrl || !app || !clientIds.length || env.MCP_CONNECTOR_ENABLED !== 'true') return null;
-  return { issuer: `${supabaseUrl}/auth/v1`, resource: `${app}/api/mcp`, clientIds, metadataUrl: `${app}/.well-known/oauth-protected-resource/api/mcp` };
+  const extra = (env.MCP_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean).map(normalOrigin).filter((o): o is string => !!o);
+  const appOrigin = normalOrigin(app);
+  return { issuer: `${supabaseUrl}/auth/v1`, resource: `${app}/api/mcp`, clientIds, metadataUrl: `${app}/.well-known/oauth-protected-resource/api/mcp`,
+    allowedOrigins: [...new Set([...(appOrigin ? [appOrigin] : []), ...extra])] };
+}
+
+/** scheme://host[:port] for an exact http(s) origin; null for anything else (paths, wildcards, "null"). */
+function normalOrigin(o: string): string | null {
+  if (!/^https?:\/\/[^/*\s]+$/i.test(o.replace(/\/+$/, ''))) return null;
+  try { const u = new URL(o); return u.origin === 'null' ? null : u.origin; } catch { return null; }
+}
+
+/** MCP Streamable HTTP: servers MUST validate Origin and answer 403 for invalid ones (DNS rebinding).
+ *  No Origin header = not a browser (Claude calls server-to-server): allowed, the bearer token still decides.
+ *  A present Origin must exactly match the allowlist; "null" and lookalikes are refused. */
+export function originAllowed(origin: string | null, cfg: Pick<McpAuthConfig, 'allowedOrigins'>) {
+  if (origin === null) return true;
+  const o = normalOrigin(origin.trim());
+  return !!o && o === origin.trim().replace(/\/+$/, '') && cfg.allowedOrigins.includes(o);
 }
 
 const jwksCache = new Map<string, JWTVerifyGetKey>();

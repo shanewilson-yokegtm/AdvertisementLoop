@@ -7,6 +7,7 @@
 
 alter table public.processing add column feedback_snapshot jsonb not null default '[]';
 alter table public.processing add column engine text not null default 'worker' check (engine in ('worker', 'higgsfield'));
+alter table public.processing add column render_claimed_at timestamptz;   -- who may submit the one Higgsfield render (see claim below)
 alter table public.higgsfield_jobs add column processing_id uuid references public.processing(id);
 alter table public.higgsfield_jobs add column parent_version_id text references public.versions(id);
 create unique index higgsfield_jobs_one_per_processing on public.higgsfield_jobs(processing_id) where processing_id is not null;
@@ -126,3 +127,22 @@ begin
   new.created_at := now();
   return new;
 end $$;
+
+-- Higgsfield regenerate, step 2 (server only): exactly one caller may create the Rendering version and submit.
+-- Two presses (double click, two tabs, a retried request) both reach the same executing row before any job exists;
+-- without this the loser hit stale_parent and could close the winner's run. Compare-and-set: the first caller gets
+-- true; others get false and must not generate or close the run. A claim is retaken only if it is stale (its holder
+-- died before inserting the job) and no job exists, so a render is never submitted twice for one run.
+create or replace function public.higgsfield_revision_claim(p_processing uuid) returns boolean
+  language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  update public.processing p set render_claimed_at = now(), updated_at = now()
+    where p.id = p_processing and p.engine = 'higgsfield' and p.status = 'executing'
+      and (p.render_claimed_at is null or p.render_claimed_at < now() - interval '2 minutes')
+      and not exists (select 1 from public.higgsfield_jobs j where j.processing_id = p.id);
+  get diagnostics n = row_count;
+  return n = 1;
+end $$;
+revoke all on function public.higgsfield_revision_claim(uuid) from public, anon, authenticated;
+grant execute on function public.higgsfield_revision_claim(uuid) to service_role;

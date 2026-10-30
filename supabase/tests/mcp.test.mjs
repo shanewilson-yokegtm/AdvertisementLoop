@@ -157,5 +157,45 @@ ok('paid generation refused without explicit person_confirmed', noConfirm.isErro
 const falseConfirm = await cT.callTool({ name: 'post_to_slack', arguments: { asset_id: asset.id, version_id: v1.id, channel_id: 'C0123456', request_id: 'req-00000001', person_confirmed: false } });
 ok('Slack posting refused unless person_confirmed is literally true', falseConfirm.isError === true);
 
+// ---------- Origin (DNS rebinding): exact allowlist, 403 for anything else, no CORS ----------
+ok('origin: app origin allowed by default; none extra', JSON.stringify(cfg.allowedOrigins) === JSON.stringify(['https://studio.example']));
+const cfg2 = auth.mcpConfig({ NEXT_PUBLIC_SUPABASE_URL: 'https://ref.supabase.co', APP_URL: 'https://studio.example', MCP_OAUTH_CLIENT_IDS: 'claude-connector', MCP_CONNECTOR_ENABLED: 'true',
+  MCP_ALLOWED_ORIGINS: 'https://claude.ai, *, https://*.evil.example, null, https://claude.ai/path, http://localhost:6274' });
+ok('origin: wildcards, "null" and paths in the env list are ignored', JSON.stringify(cfg2.allowedOrigins) === JSON.stringify(['https://studio.example', 'https://claude.ai', 'http://localhost:6274']));
+ok('origin: no Origin header (server-to-server, like Claude) is allowed', auth.originAllowed(null, cfg));
+ok('origin: exact allowlisted origin allowed', auth.originAllowed('https://studio.example', cfg) && auth.originAllowed('https://claude.ai', cfg2));
+ok('origin: other sites, lookalikes, "null", other ports/schemes refused', ['https://evil.example', 'https://studio.example.evil.com', 'null', 'http://studio.example', 'https://studio.example:8443', 'https://claude.ai', 'https://studio.example/x', '*', ''].every(o => !auth.originAllowed(o, cfg)));
+{
+  Object.assign(process.env, { NEXT_PUBLIC_SUPABASE_URL: 'https://ref.supabase.co', APP_URL: 'https://studio.example', MCP_OAUTH_CLIENT_IDS: 'claude-connector', MCP_CONNECTOR_ENABLED: 'true', SUPABASE_SERVICE_ROLE_KEY: 'test-only' });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init) => String(u) === `${ISS}/.well-known/jwks.json` ? Response.json({ keys: [jwk] }) : realFetch(u, init);
+  const code = ts.transpileModule(readFileSync(path.join(root, 'src/app/api/mcp/route.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const route = { exports: {} };
+  new Function('require', 'module', 'exports', code)(id => ({ '@/lib/supabase/server': { serviceClient: () => sdb }, '@/lib/server/mcp-auth': auth, '@/lib/server/mcp-tools': load('src/lib/server/mcp-tools.ts') })[id] || require(id), route, route.exports);
+  const token = await mint();
+  const call = (headers, body = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) => route.exports.POST(new Request('https://studio.example/api/mcp', { method: 'POST', body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18', ...headers } }));
+  const evil = await call({ origin: 'https://evil.example', authorization: `Bearer ${token}` });
+  ok('endpoint: bad Origin gets 403 even with a valid token, and no CORS header', evil.status === 403 && !evil.headers.get('access-control-allow-origin') && (await evil.json()).error === 'forbidden_origin');
+  const nul = await call({ origin: 'null', authorization: `Bearer ${token}` });
+  ok('endpoint: Origin "null" (sandboxed iframe, file://) gets 403', nul.status === 403);
+  const noTok = await call({});
+  ok('endpoint: no token gets 401 with the discovery challenge', noTok.status === 401 && /resource_metadata="https:\/\/studio\.example\/\.well-known\/oauth-protected-resource\/api\/mcp"/.test(noTok.headers.get('www-authenticate') || ''));
+  const wrongAud = await call({ authorization: `Bearer ${await mint({ aud: 'authenticated' })}` });
+  ok('endpoint: default-audience token gets 401 invalid_token', wrongAud.status === 401 && /error="invalid_token"/.test(wrongAud.headers.get('www-authenticate') || ''));
+  const okServer = await call({ authorization: `Bearer ${token}` });
+  const listed = okServer.status === 200 ? await okServer.json() : null;
+  ok('endpoint: server-to-server call (no Origin) with a valid token lists the tools', okServer.status === 200 && listed?.result?.tools?.length === TOOL_NAMES.length && !okServer.headers.get('access-control-allow-origin'), `status ${okServer.status}`);
+  const okApp = await call({ origin: 'https://studio.example', authorization: `Bearer ${token}` });
+  ok('endpoint: the app\'s own origin is allowed', okApp.status === 200);
+  const me = await (await call({ authorization: `Bearer ${token}` }, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } })).json();
+  ok('endpoint: tools run as the token\'s member', JSON.parse(me.result.content[0].text).user_id === TENG);
+  const prmMod = { exports: {} };
+  new Function('require', 'module', 'exports', ts.transpileModule(readFileSync(path.join(root, 'src/app/.well-known/oauth-protected-resource/[[...path]]/route.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(id => id === '@/lib/server/mcp-auth' ? auth : require(id), prmMod, prmMod.exports);
+  const prmRes = await prmMod.exports.GET(new Request('https://studio.example/.well-known/oauth-protected-resource/api/mcp'));
+  ok('metadata is served without wildcard CORS', prmRes.status === 200 && !prmRes.headers.get('access-control-allow-origin') && (await prmRes.json()).resource === 'https://studio.example/api/mcp');
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

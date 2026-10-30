@@ -9,5 +9,5 @@ export async function GET(req: Request) {
   const origin = new URL(req.url).origin;
   const cfg = mcpConfig(process.env, origin);
   if (!cfg) return NextResponse.json({ error: 'connector_not_enabled' }, { status: 404 });
-  return NextResponse.json(resourceMetadata(cfg, process.env.APP_URL || origin), { headers: { 'cache-control': 'public, max-age=300', 'access-control-allow-origin': '*' } });
+  return NextResponse.json(resourceMetadata(cfg, process.env.APP_URL || origin), { headers: { 'cache-control': 'public, max-age=300' } });
 }

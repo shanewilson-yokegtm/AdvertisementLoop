@@ -31,10 +31,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
       // Regenerate a Higgsfield ad from its approved feedback: one paid render, confirmed by the owner/admin in the app.
       if (b?.confirm !== true) return NextResponse.json({ error: 'invalid', message: 'Confirm the paid render first.' }, { status: 400 });
       const r = await startHiggsfieldRevision(serviceClient(), m as any, String(b?.asset_id || ''), b?.note ? String(b.note).slice(0, 2000) : null, creds, process.env.APP_URL || new URL(req.url).origin);
-      return NextResponse.json({ processing_id: r.processing_id, asset_id: r.asset_id, version_id: r.version_id, job_id: r.job.id, status: r.job.status, repeated: r.repeated });
+      return NextResponse.json({ processing_id: r.processing_id, asset_id: r.asset_id, version_id: r.version_id, job_id: r.job?.id ?? null, status: r.job?.status ?? 'starting', repeated: r.repeated });
     }
     const r = await generate(serviceClient(), m as any, b, creds, process.env.APP_URL || new URL(req.url).origin);
-    return NextResponse.json({ asset_id: r.asset_id, version_id: r.version_id, job_id: r.job.id, status: r.job.status, repeated: r.repeated });
+    return NextResponse.json({ asset_id: r.asset_id, version_id: r.version_id, job_id: r.job?.id ?? null, status: r.job?.status ?? 'starting', repeated: r.repeated });
   } catch (e) { return err(e); }
 }
 
