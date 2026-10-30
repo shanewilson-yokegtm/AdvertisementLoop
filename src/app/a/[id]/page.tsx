@@ -29,10 +29,10 @@ function AssetDetail({ id }: { id: string }) {
   const comments = useRows<Comment>('comments', { filter: ['asset_id', id], order: 'created_at', asc: true });
   const shares = useRows<any>('shares', { filter: ['asset_id', id], order: 'at' });
   const [sel, setSel] = useState<string | null>(null); const [up, setUp] = useState(false); const [share, setShare] = useState(false);
-  const [note, setNote] = useState(''); const [cmt, setCmt] = useState(''); const [atHead, setAtHead] = useState(false);
+  const [cmt, setCmt] = useState(''); const [atHead, setAtHead] = useState(false);
   const a = assets.rows[0]; const vs = versions.rows; const latest = vs[vs.length - 1];
   const requested = params.get('v'); const selectedId = requested ?? sel;
-  useEffect(() => { setNote(''); setCmt(''); setAtHead(false); setShare(false); }, [selectedId]);
+  useEffect(() => { setCmt(''); setAtHead(false); setShare(false); }, [selectedId]);
   // Freeze the initial selection. Realtime updates must never change the version being reviewed.
   useEffect(() => { if (versions.ready && latest && !sel) setSel(latest.id); }, [versions.ready, latest?.id, sel]);
   const v = vs.find(x => x.id === selectedId);
@@ -45,12 +45,11 @@ function AssetDetail({ id }: { id: string }) {
   const procs = useRows<Processing>('processing', { filter: ['asset_id', id], order: 'created_at', asc: true });
   const playhead = () => { const pv = document.getElementById('pv') as HTMLVideoElement | null; return pv ? Math.round(pv.currentTime * 10) / 10 : null; };
   // Voice is the primary way to review: the live transcript fills the note box, the audio is kept with it.
-  const noteBase = useRef(''); const cmtBase = useRef('');
-  const revRec = useRecorder({ playheadSec: playhead, toast, onText: t => setNote((noteBase.current ? noteBase.current + ' ' : '') + t) });
+  const cmtBase = useRef('');
   const cmtRec = useRecorder({ playheadSec: playhead, toast, onText: t => setCmt((cmtBase.current ? cmtBase.current + ' ' : '') + t) });
   const [busy, setBusy] = useState(false);
   const selectVersion = (versionId: string) => {
-    setNote(''); setCmt(''); setAtHead(false); setShare(false);
+    setCmt(''); setAtHead(false); setShare(false);
     router.replace(assetVersionPath(id, versionId), { scroll: false });
   };
   if (!assets.ready || !versions.ready || (latest && selectedId === null)) return <div className="empty"><span className="muted">Loading</span></div>;
@@ -61,23 +60,16 @@ function AssetDetail({ id }: { id: string }) {
   const manage = canManage(member, a); const ownerName = who(a.owner_id, a.legacy_creator);
   const proc = procs.rows[procs.rows.length - 1] || null;
 
-  const review = async (status: 'approved' | 'changes') => {
-    if (status === 'approved' && blockedApproval) { toast(blockedApproval); return; }
-    if (revRec.state === 'rec') { toast('Stop the recording first'); return; }
+  const review = async (status: 'approved') => {
+    if (blockedApproval) { toast(blockedApproval); return; }
     setBusy(true);
-    try {
-      // Keep the spoken feedback (audio + transcript) with the version before the decision is recorded.
-      if (note.trim() || revRec.take) await saveVoiceComment(a.id, v.id, revRec.take, note);
-      const { error } = await sb().from('reviews').upsert({ version_id: v.id, status, note: note.trim() || null }, { onConflict: 'version_id' });
-      if (error) throw error;
-      setNote(''); noteBase.current = ''; revRec.clear();
-      toast(status === 'approved' ? 'Approved' : `Changes requested · in ${manage && a.owner_id === member?.user_id ? 'your' : ownerName + '’s'} feedback to process`);
-    } catch (e: any) { toast('Not saved · ' + (e?.message || e)); }
+    const { error } = await sb().from('reviews').upsert({ version_id: v.id, status, note: null }, { onConflict: 'version_id' });
+    toast(error ? 'Not saved · ' + error.message : `v${v.version} approved`);
     setBusy(false);
   };
   // Reject: not worth fixing. The ad leaves the Library (archived, restorable) and queued revisions are cancelled.
   const reject = async () => {
-    if (revRec.state === 'rec') revRec.stop();
+    if (cmtRec.state === 'rec') cmtRec.stop();
     setBusy(true);
     const { error } = await sb().from('assets').update({ archived: true, archived_note: `Rejected by ${member?.display_name || 'a reviewer'}` }).eq('id', a.id);
     setBusy(false);
@@ -131,41 +123,38 @@ function AssetDetail({ id }: { id: string }) {
           {v.file_path ? <button className="btn" onClick={download}>Download</button> : null}
           {src.link ? <a className="btn" href={src.link} target="_blank" rel="noopener">Editable source</a> : null}
         </div>
-        {can(member, 'approver') ? <div className="panel"><div className="row" style={{ justifyContent: 'space-between' }}><h3>Review v{v.version}</h3></div>
-          {blockedApproval ? <p className="muted" role="status">{blockedApproval}</p> : null}
-          <RecordControl r={{ ...revRec, start: () => { noteBase.current = note.trim(); return revRec.start(); } }} label="Record feedback" />
-          <label className="sr" htmlFor="rev-note">What should change</label>
-          <textarea id="rev-note" rows={3} placeholder="Talk or type what should change" value={note} onChange={e => setNote(e.target.value)} />
-          <div className="row"><button className="btn primary" disabled={busy || revRec.state === 'rec' || !(note.trim() || revRec.take)} onClick={() => review('changes')}>Request changes</button>
-            <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} onClick={() => review('approved')}>{rev?.status === 'approved' ? 'Approved' : 'Approve'}</button>
-            {!a.archived && manage ? <button className="btn quiet-danger" disabled={busy} onClick={reject}>Reject ad</button> : null}</div>
+        {can(member, 'approver') || manage ? <div className="row">
+          {can(member, 'approver') ? <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} title={blockedApproval || ''} onClick={() => review('approved')}>{rev?.status === 'approved' ? `v${v.version} approved` : `Approve v${v.version}`}</button> : null}
+          {!a.archived && manage ? <button className="btn quiet-danger" disabled={busy} onClick={reject}>Reject ad</button> : null}
           {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}</div> : job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
+        {can(member, 'creator') || can(member, 'approver') ? <form className="panel" aria-label="Feedback" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
+            if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
+            try {
+              if (cmtRec.take) await saveVoiceComment(a.id, v.id, cmtRec.take, t);
+              else { const pv = document.getElementById('pv') as HTMLVideoElement | null;
+                const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null }); if (error) throw error; }
+              setCmt(''); cmtBase.current = ''; cmtRec.clear(); comments.reload();
+              toast(manage ? 'Feedback added · approve it below' : `Feedback sent to ${ownerName}`);
+            } catch (err: any) { toast('Not saved · ' + (err?.message || err)); } }}>
+          <h3>Feedback on v{v.version}</h3>
+          <RecordControl r={{ ...cmtRec, start: () => { cmtBase.current = cmt.trim(); return cmtRec.start(); } }} label="Record feedback" />
+          <label className="sr" htmlFor="cmt">Feedback</label><textarea id="cmt" rows={3} placeholder="Talk or type what should change" value={cmt} onChange={e => setCmt(e.target.value)} />
+          <div className="row" style={{ justifyContent: 'space-between' }}>{isVideo(v) ? <label className="row"><input type="checkbox" checked={atHead} onChange={e => setAtHead(e.target.checked)} /> At playhead</label> : <span />}<button className="btn primary" disabled={cmtRec.state === 'rec' || !(cmt.trim() || cmtRec.take)}>Add feedback</button></div>
+        </form> : null}
         {shares.rows.length ? <div className="muted">{shares.rows.slice(0, 3).map((s: any) => <div key={s.id}>Shared{s.channel ? ' to ' + s.channel : ''} by {who(s.shared_by)} · {fmtDate(s.at)}</div>)}</div> : null}
         {manage ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }}
           who={who} audioUrls={audioUrls} toast={toast} onOpen={selectVersion} ownerName={ownerName} /> : null}
         <ChangeLog assetId={a.id} onOpen={selectVersion} refreshKey={`${vs.length}:${comments.rows.filter(c => c.status !== 'open').length}:${proc?.status || ''}`} />
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>{manage ? 'Comment history' : 'Feedback'}</h2>
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}><h2>{manage ? 'Decided feedback' : 'Feedback'}</h2>
           {/* Owners decide on open comments above; here they see what was accepted/ignored. Everyone else sees the full thread. */}
-          {(() => { const list = manage ? comments.rows.filter(c => c.status !== 'open') : comments.rows; return !list.length ? <div className="muted">{manage ? 'Nothing decided yet' : 'No comments yet'}</div> : list.map(c => { const cv = vs.find(x => x.id === c.version_id);
+          {(() => { const list = manage ? comments.rows.filter(c => c.status !== 'open') : comments.rows; return !list.length ? <div className="muted">{manage ? 'Nothing decided yet' : 'No feedback yet'}</div> : list.map(c => { const cv = vs.find(x => x.id === c.version_id);
             return <div className="cmt" key={c.id}><div className="row"><b>{who(c.author, c.legacy_author)}</b><span className="muted">v{cv?.version ?? '?'}{c.at_sec != null ? ' · at ' + fmtSec(c.at_sec) : ''} · {fmtDate(c.created_at)}</span>
-              {c.status === 'applied' ? <span className="chip ok">Accepted{c.applied_in ? ' in v' + (vs.find(x => x.id === c.applied_in)?.version ?? '?') : ''}</span> : c.status === 'dismissed' ? <span className="chip">Ignored</span> : <span className="chip warn">Open</span>}</div>
+              {c.status === 'applied' ? <span className="chip ok">Approved{c.applied_in ? ' in v' + (vs.find(x => x.id === c.applied_in)?.version ?? '?') : ''}</span> : c.status === 'dismissed' ? <span className="chip">Rejected</span> : c.decision === 'approved' ? <span className="chip ok">Approved · waiting</span> : <span className="chip warn">Open</span>}</div>
               {c.audio_path ? <audio controls preload="none" src={audioUrls[c.audio_path]} style={{ width: '100%' }} aria-label={`Voice note from ${who(c.author, c.legacy_author)}`} /> : null}
               {c.audio_path && c.body === 'Voice note' ? null : <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>}
               {c.resolution_note ? <div className="muted">{c.status === 'dismissed' ? 'Reason: ' : 'Note: '}{c.resolution_note}</div> : null}
               {c.deleted_at ? <div className="muted">Deleted in Slack (kept for history)</div> : c.edited_at ? <div className="muted">Edited in Slack</div> : null}
               {c.source_link ? <a className="muted" href={c.source_link} target="_blank" rel="noopener">View in Slack</a> : null}</div>; }); })()}
-          {can(member, 'creator') ? <form className="panel" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
-              if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
-              try {
-                if (cmtRec.take) await saveVoiceComment(a.id, v.id, cmtRec.take, t);
-                else { const pv = document.getElementById('pv') as HTMLVideoElement | null;
-                  const { error } = await sb().from('comments').insert({ asset_id: a.id, version_id: v.id, body: t, at_sec: isVideo(v) && atHead && pv ? Math.round(pv.currentTime * 10) / 10 : null }); if (error) throw error; }
-                setCmt(''); cmtBase.current = ''; cmtRec.clear(); toast('Comment added');
-              } catch (err: any) { toast('Not saved · ' + (err?.message || err)); } }}>
-            <RecordControl r={{ ...cmtRec, start: () => { cmtBase.current = cmt.trim(); return cmtRec.start(); } }} label="Record a comment" />
-            <label className="sr" htmlFor="cmt">Comment</label><textarea id="cmt" rows={2} placeholder="Talk or type a comment" value={cmt} onChange={e => setCmt(e.target.value)} />
-            <div className="row" style={{ justifyContent: 'space-between' }}>{isVideo(v) ? <label className="row"><input type="checkbox" checked={atHead} onChange={e => setAtHead(e.target.checked)} /> At playhead</label> : <span />}<button className="btn primary">Comment</button></div>
-          </form> : null}
         </section>
         <details><summary style={{ cursor: 'pointer', fontWeight: 650 }}>Copy, checks and file</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
