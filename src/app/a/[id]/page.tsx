@@ -16,8 +16,6 @@ import ChangeLog from '@/components/ChangeLog';
 import { useHiggsfieldPoll } from '@/components/Higgsfield';
 import { radioKeys, tab } from '@/lib/radio';
 
-const ORDER = ['vertical', 'feed45', 'square', 'landscape'];
-
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
   return <Suspense fallback={<div className="empty">Loading</div>}><AssetDetail key={id} id={id} /></Suspense>;
@@ -27,7 +25,6 @@ function AssetDetail({ id }: { id: string }) {
   const router = useRouter(); const params = useSearchParams();
   const { member, toast } = useApp(); const who = useMembers();
   const assets = useRows<Asset>('assets', { filter: ['id', id] });
-  const all = useRows<Asset>('assets');
   const versions = useRows<Version>('versions', { filter: ['asset_id', id], order: 'version', asc: true });
   const reviews = useRows<Review>('reviews');
   const comments = useRows<Comment>('comments', { filter: ['asset_id', id], order: 'created_at', asc: true });
@@ -68,9 +65,6 @@ function AssetDetail({ id }: { id: string }) {
   const inFlight = new Set(active?.comment_ids || []);
   const activeNext = active ? (vs.find(x => x.id === active.reviewed_version_id)?.version || 0) + 1 : (latest?.version || 0) + 1;
   const openCount = comments.rows.filter(c => c.status === 'open' && !c.deleted_at && !inFlight.has(c.id)).length;
-  // Aspect-ratio variants of the same concept are separate ads; switch between them here.
-  const siblings = all.rows.filter(x => !x.archived && x.kind === a.kind && x.concept_name.trim().toLowerCase() === a.concept_name.trim().toLowerCase())
-    .sort((x, y) => ORDER.indexOf(x.format) - ORDER.indexOf(y.format));
 
   const review = async (status: 'approved') => {
     if (blockedApproval) { toast(blockedApproval); return; }
@@ -113,8 +107,6 @@ function AssetDetail({ id }: { id: string }) {
         <div className="stagebar">
           {vs.length > 1 ? <div className="seg sm" role="radiogroup" aria-label="Version" onKeyDown={radioKeys}>{vs.map(x =>
             <button key={x.id} type="button" role="radio" aria-checked={x.id === v.id} tabIndex={tab(x.id === v.id)} onClick={() => selectVersion(x.id)}>v{x.version}</button>)}</div> : <span className="muted small">v{v.version}</span>}
-          {siblings.length > 1 ? <nav className="seg sm" aria-label="Format">{siblings.map(x =>
-            <Link key={x.id} href={`/a/${x.id}`} aria-current={x.id === a.id ? 'page' : undefined}>{FORMATS[x.format]?.label || x.format}</Link>)}</nav> : null}
         </div>
         {!isLatest && latest ? <div className="banner" role="status"><span>You’re viewing v{v.version}. A newer version is available.</span>
           <span className="row"><button className="btn small" onClick={() => selectVersion(latest.id)}>View v{latest.version}</button>

@@ -346,46 +346,46 @@ test('Higgsfield form: 9 s default, 4-12 s, 720p, sound toggle, one request per 
   globalThis.fetch = realFetch; await finish();
 });
 
-test('Library shows one card per concept; approved concepts download every format', async () => {
-  const mk = (id, name, format, status, archived = false) => ({ a: { id, concept_name: name, kind: 'motion', format, archived, owner_id: 'shane' }, v: { id: id + '_v2', asset_id: id, version: 2, file_path: id + '/v2.mp4', poster_path: null, content_type: 'video/mp4', created_at: '2026-10-29T10:00:00Z' }, status });
-  const list = [mk('a1', 'Clay: Credit math', 'feed45', 'approved'), mk('a2', 'Clay: Credit math ', 'vertical', 'approved'),
-    mk('b1', 'Clay: What did it do?', 'vertical', 'changes'), mk('b2', 'Clay: What did it do?', 'feed45', null), mk('c1', 'Old one', 'square', null, true)];
+test('Library: one card per asset; same titles are never merged; counts, links and downloads stay per asset', async () => {
+  const mk = (id, name, format, owner, status, archived = false) => ({ a: { id, concept_name: name, kind: 'motion', format, archived, owner_id: owner }, v: { id: id + '_v2', asset_id: id, version: 2, file_path: id + '/v2.mp4', poster_path: null, content_type: 'video/mp4', created_at: '2026-10-29T10:00:00Z' }, status });
+  // Same title, different owners, and same owner twice: all independent ads.
+  const list = [mk('a1', 'Clay: Credit math', 'feed45', 'shane', 'approved'), mk('a2', 'Clay: Credit math', 'vertical', 'shane', 'approved'),
+    mk('b1', 'Clay: Credit math', 'vertical', 'teng', 'changes'), mk('b2', 'Other', 'feed45', 'teng', null), mk('c1', 'Old one', 'square', 'shane', null, true)];
   const rows = { assets: list.map(x => x.a), versions: list.map(x => x.v), reviews: list.filter(x => x.status).map(x => ({ version_id: x.v.id, status: x.status })), comments: [] };
   const signedFor = [];
   const Page = source('src/app/page.tsx', {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
-    '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane',
-      useInbox: (scope, on = true) => ({ rows: scope === 'all' && on ? [{ asset_id: 'b2', pending: 2 }] : [] }), can: () => true,
+    '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => id => ({ shane: 'Shane', teng: 'Teng' })[id] || 'Teammate',
+      useInbox: (scope, on = true) => ({ rows: scope === 'all' && on ? [{ asset_id: 'b1', pending: 2 }] : [] }), can: () => true,
       FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {} },
     '@/lib/supabase/browser': { sb: () => ({ storage: { from: () => ({ createSignedUrl: async (p, _s, o) => { signedFor.push([p, o.download]); return { data: { signedUrl: 'about:blank#' + p } }; } }) } }) },
     '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
     '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: s => React.createElement('span', null, s), renderChip: () => null },
   }).default;
   await mount(Page);
-  const titles = () => [...document.querySelectorAll('.grid:not(details .grid) .card .t')].map(e => e.textContent);
-  assert.deepEqual(titles().sort(), ['Clay: Credit math', 'Clay: What did it do?'], 'two concepts, not four format cards');
-  assert.deepEqual([...document.querySelectorAll('.card')][0].querySelector('a').getAttribute('href').startsWith('/a/'), true);
-  const fmts = t => [...[...document.querySelectorAll('.card')].find(c => c.querySelector('.t').textContent === t).querySelectorAll('[aria-label="Formats"] a')].map(e => e.textContent);
-  assert.deepEqual(fmts('Clay: Credit math'), ['9:16', '4:5'], '9:16 listed first');
-  const views = [...document.querySelectorAll('[role=radiogroup][aria-label="Show"] [role=radio]')].map(b => b.textContent);
-  assert.deepEqual(views, ['All2', 'Feedback for you0', 'Approved1'], 'three views, not a wall of status pills');
-  await act(async () => [...document.querySelectorAll('[role=radio]')].find(b => b.textContent === 'Approved1').click());
-  assert.deepEqual(titles(), ['Clay: Credit math']);
-  await act(async () => { buttonStarting('Download all').click(); await new Promise(r => setTimeout(r, 1000)); });
-  assert.deepEqual(signedFor.map(x => x[0]), ['a2/v2.mp4', 'a1/v2.mp4']);
-  assert.match(signedFor[0][1], /Clay Credit math 9x16\.mp4/);
-  // Feedback is personal by default; an admin widens it deliberately.
+  const cards = () => [...document.querySelectorAll('.grid:not(details .grid) .card')];
+  const hrefs = () => cards().map(c => c.querySelector('a').getAttribute('href')).sort();
+  assert.deepEqual(hrefs(), ['/a/a1', '/a/a2', '/a/b1', '/a/b2'], 'four separate ads; the archived one is not in the main grid');
+  assert.match(cards().find(c => c.querySelector('a').getAttribute('href') === '/a/b1').querySelector('.sub').textContent, /Teng · 9:16/, 'owner and format on each card');
   const pick = label => [...document.querySelectorAll('[role=radio]')].find(b => b.textContent.startsWith(label));
+  const views = [...document.querySelectorAll('[role=radiogroup][aria-label="Show"] [role=radio]')].map(b => b.textContent);
+  assert.deepEqual(views, ['All4', 'Feedback for you0', 'Approved2'], 'three views, not a wall of status pills');
+  await act(async () => pick('Approved').click());
+  assert.deepEqual(hrefs(), ['/a/a1', '/a/a2']);
+  await act(async () => { [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Download Clay: Credit math, 9:16').click(); await new Promise(r => setTimeout(r, 0)); });
+  assert.deepEqual(signedFor.map(x => x[0]), ['a2/v2.mp4'], 'downloads exactly that asset');
+  assert.match(signedFor[0][1], /Clay Credit math 9x16\.mp4/);
+  // Feedback is personal by default; an admin widens it deliberately. Counts belong to the one asset.
   await act(async () => pick('Feedback for you').click());
-  assert.deepEqual(titles(), [], 'nothing waiting on Shane personally');
+  assert.deepEqual(hrefs(), [], 'nothing waiting on Shane personally');
   await act(async () => pick('Everyone’s').click());
-  assert.deepEqual(titles(), ['Clay: What did it do?']);
-  assert.match(document.querySelector('.count').textContent, /^2$/);
+  assert.deepEqual(hrefs(), ['/a/b1'], 'only the asset with feedback, not its same-title neighbours');
+  assert.equal(document.querySelector('.count').textContent, '2');
   await act(async () => pick('All').click());
-  assert.equal(pick('Everyone’s'), undefined, 'scope control only in the feedback view');
+  assert.ok(!pick('Everyone’s'), 'scope control only in the feedback view');
   const search = document.querySelector('input[type=search]'); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-  await act(async () => { setter.call(search, 'credit'); search.dispatchEvent(new window.Event('input', { bubbles: true })); });
-  assert.deepEqual(titles(), ['Clay: Credit math']);
+  await act(async () => { setter.call(search, 'teng'); search.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  assert.deepEqual(hrefs(), ['/a/b1', '/a/b2'], 'search matches owners too');
   await finish();
 });
 
