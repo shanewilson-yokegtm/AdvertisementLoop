@@ -50,7 +50,7 @@ Nothing here uses Rumi or other Yoke production systems.
   For everything else the app shows **Continue in Claude**, and the connector's `start_revision` claims the run (atomic
   against the worker and other people; stale claims only by explicit take-over), returns only the frozen approved items
   and the exact parent, then `save_version` (with `processing_id`) and `complete_revision` / `fail_revision` close it
-  through the same processing rules. Migration `20261030092000_claude_revisions`.
+  through the same processing rules. Migration `20261030161111_claude_revisions`.
 - **Claude connector (recommended, built but off until approved):** remote MCP at `/api/mcp`, signed in per person through Supabase Auth's OAuth 2.1 server with explicit consent at `/oauth/consent`. Tools call the same API rules as the app, as that member. See *Claude connector setup* below.
 - API: `/api/v1/*`, authenticated with a personal token from **Connect Claude › Advanced** (stored hashed, revocable). For Claude Code and scripts that keep secrets in their own environment. Needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel; all writes still go through owner/admin checks as the token's member.
 - Tests: `npm test` (database rules, API, Slack, UI) and `npm run test:e2e` (skill helper -> API -> database with real file bytes).
@@ -114,7 +114,7 @@ Create an ad → **Higgsfield video**. Any creator can generate. Settings are fi
 
 The connector is per person: each member signs in with their own Yoke account and approves it once. No shared token.
 
-1. Apply migrations `20261030090000_mcp_oauth_guard`, `20261030091000_higgsfield_revisions` and `20261030092000_claude_revisions` (Supabase approval card).
+1. Apply migrations `20261030160941_mcp_oauth_guard`, `20261030161044_higgsfield_revisions` and `20261030161111_claude_revisions` (Supabase approval card).
    The guard makes OAuth connector tokens useless against the Data API, Storage and Realtime (PostgREST pre-request
    check + restrictive RLS on every table), so the connector can only act through `/api/mcp`.
 2. Supabase › Authentication › OAuth Server: enable it; **Authorization Path** `/oauth/consent` (Site URL must be the app
