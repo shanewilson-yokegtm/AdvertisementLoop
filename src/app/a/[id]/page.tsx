@@ -98,7 +98,7 @@ function AssetDetail({ id }: { id: string }) {
     if (data?.signedUrl) location.href = data.signedUrl;
   };
   const closeMenu = (e: React.MouseEvent) => { const d = (e.currentTarget as HTMLElement).closest('details'); if (d) d.open = false; };
-  const hasMore = !!src.link || manage;
+  const hasMore = !!src.link || (manage && a.archived);
   const copyRows = [...(v.copy?.headlines || []).map((t: string) => ['Headline', t]), ...(v.copy?.primaryText || []).map((t: string) => ['Primary text', t])];
 
   return <>
@@ -126,12 +126,12 @@ function AssetDetail({ id }: { id: string }) {
 
         <div className="actions">
           {can(member, 'approver') ? <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} title={blockedApproval || 'Final approval: this version is ready to run'} onClick={() => review('approved')}>{rev?.status === 'approved' ? `v${v.version} approved` : `Approve v${v.version}`}</button> : null}
+          {manage && !a.archived ? <button className="btn quiet-danger" disabled={busy} title="Moves it to Rejected and archived. You can restore it later." onClick={reject}>Reject ad</button> : null}
           <button className="btn" onClick={() => setShare(true)}>Share</button>
           {v.file_path ? <button className="btn" onClick={download}>Download</button> : null}
           {hasMore ? <details className="dd"><summary className="btn ghost icon" aria-label="More actions" title="More actions">•••</summary>
             <div className="menu" role="menu">
               {src.link ? <a role="menuitem" className="mi" href={src.link} target="_blank" rel="noopener" onClick={closeMenu}>Open editable source</a> : null}
-              {manage && !a.archived ? <><hr /><button role="menuitem" type="button" className="mi danger" disabled={busy} onClick={e => { closeMenu(e); void reject(); }}>Reject ad<span className="muted">Moves it to Archived</span></button></> : null}
               {manage && a.archived ? <button role="menuitem" type="button" className="mi" onClick={e => { closeMenu(e); void restore(); }}>Restore to Library</button> : null}
             </div></details> : null}
         </div>

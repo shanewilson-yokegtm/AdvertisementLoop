@@ -99,13 +99,18 @@ test('one feedback box: needs text, then saves feedback on the version being vie
   await finish();
 });
 
-test('the action row is Approve, Share, Download, with the rest under More', async () => {
-  const f = reviewFixture(); await mount(f.Page);
+test('the action row is Approve, Reject ad, Share, Download; More only when it has items', async () => {
+  let f = reviewFixture(); await mount(f.Page);
   const row = button('Share').parentElement;
-  assert.deepEqual([...row.children].filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['Approve v1', 'Share', 'Download']);
-  assert.ok(row.querySelector('summary[aria-label="More actions"]'), 'secondary actions sit behind More');
-  assert.ok(row.querySelector('details .menu').contains(buttonStarting('Reject ad')), 'Reject ad lives in the More menu');
+  assert.deepEqual([...row.children].filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['Approve v1', 'Reject ad', 'Share', 'Download']);
+  assert.ok(!row.querySelector('summary[aria-label="More actions"]'), 'no empty More menu');
+  assert.equal([...document.querySelectorAll('button')].filter(b => b.textContent.startsWith('Reject ad')).length, 1, 'one Reject ad, not duplicated in a menu');
   for (const label of ['Iterate with Claude', 'Upload new version', 'Suggest a change', 'Share for review']) assert.equal(button(label), undefined, label + ' gone');
+  await finish();
+  f = reviewFixture(); f.rows.assets = [{ ...asset, archived: true }]; await mount(f.Page);
+  assert.ok(!buttonStarting('Reject ad'), 'archived ads have no Reject');
+  const more = document.querySelector('summary[aria-label="More actions"]');
+  assert.ok(more && more.parentElement.querySelector('.menu').contains(button('Restore to Library')), 'Restore stays reachable under More');
   await finish();
 });
 
