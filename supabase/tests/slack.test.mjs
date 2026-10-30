@@ -117,6 +117,21 @@ ok('replies in other threads are ignored', o === 'not_a_review_thread');
 o = await handleSlackEvent(sdb, slack, ev('E5', { type: 'message', user: 'UHENRY', text: 'top level', ts: '17000.504' }), APP);
 ok('top-level channel messages are ignored', o === 'not_a_reply');
 
+// A transient failure must not turn an acknowledged event id into permanently lost feedback.
+const transientEvent = ev('E-recover', { type: 'message', user: 'UHENRY', text: 'Recovered feedback', ts: '17000.505', thread_ts: post.ts });
+const unavailable = { ...sdb, from: table => {
+  const b = sdb.from(table);
+  if (table === 'slack_posts') b.maybeSingle = async () => { throw new Error('Temporary database outage'); };
+  return b;
+} };
+ok('a transient ingestion failure is recorded as retryable', (await handleSlackEvent(unavailable, slack, transientEvent, APP)).startsWith('error:'));
+ok('the same failed event can be retried successfully', await handleSlackEvent(sdb, slack, transientEvent, APP) === 'comment_saved');
+ok('retry recovery saves the feedback exactly once', await handleSlackEvent(sdb, slack, transientEvent, APP) === 'duplicate_event'
+  && (await db.query(`select count(*)::int n from comments where source_ref='CTEST0001:17000.505'`)).rows[0].n === 1);
+const abandoned = ev('E-abandoned', { type: 'message', user: 'UHENRY', text: 'Recovered abandoned work', ts: '17000.506', thread_ts: post.ts });
+await db.exec(`insert into slack_events(event_id,type,outcome,received_at) values ('E-abandoned','message','processing',now()-interval '2 minutes')`);
+ok('an interrupted event is recovered after its processing lease expires', await handleSlackEvent(sdb, slack, abandoned, APP) === 'comment_saved');
+
 // edits, deletes
 o = await handleSlackEvent(sdb, slack, ev('E6', { type: 'message', subtype: 'message_changed', message: { ts: '17000.500', text: 'At 0:03 the logo is too small' } }), APP);
 let c = (await db.query(`select body, body_history, edited_at from comments where source_ref='CTEST0001:17000.500'`)).rows[0];

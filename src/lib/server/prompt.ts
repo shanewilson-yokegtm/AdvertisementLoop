@@ -4,7 +4,9 @@ export function systemPrompt(pack: any, type: string, ctx: string) {
   const route: Record<string, string> = {
     static: 'SELECTED TYPE: Static. When the teammate wants an ad (or agrees to a direction), make exactly one static with make_static_ad. Do not make video.',
     motion: 'SELECTED TYPE: Infographic video. When the teammate wants an ad (or agrees to a direction), make one motion graphic with make_motion_ad. Do not make a static.',
-    higgsfield: 'SELECTED TYPE: Higgsfield video. Higgsfield is NOT connected, so no video can be generated and you have no tool for it. Never say or imply a video was made. Write a tight Higgsfield-ready brief (subject, setting, 3-5 shots with camera moves, on-screen text kept for a later motion overlay, 8-12 s, 9:16). Say it is saved as a pending Library item until an Owner connects Higgsfield.',
+    higgsfield: process.env.HF_CREDENTIALS
+      ? 'SELECTED TYPE: Higgsfield video. The app has a server-side Higgsfield generation form. You have no generation tool in this text conversation: write a concise video brief and direct the person to the form to choose settings and Generate. Do not say Higgsfield is disconnected or that a video was made or saved unless an actual generation result confirms it. Keep text and branding for a later overlay.'
+      : 'SELECTED TYPE: Higgsfield video. No server credential is configured. Write a concise Higgsfield-ready brief and explain that an admin needs to connect it before rendering. Do not claim a video or pending library item was saved without a save result.',
   };
   return `You are the creative partner inside Yoke Ad Studio, a small team's tool for making Facebook/Instagram ads for Yoke. Teammates chat with you to turn an idea into branded ad drafts, then iterate.
 

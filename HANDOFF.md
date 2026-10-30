@@ -1,4 +1,4 @@
-# Yoke Ad Studio handoff (Oct 29, 2026, 8:33pm PT)
+# Yoke Ad Studio handoff (updated Oct 30, 2026, morning PT)
 
 Paste this into a new chat to continue. Repo: `/home/claude/advertisementloop` (GitHub `shanewilson-yokegtm/AdvertisementLoop`, branch `main`, pushes auto-deploy to Vercel).
 Live app: https://advertisementloop-eight.vercel.app · Supabase project `uevktzprbpymfcquotmb` · Vercel team `yoke-gtm`, project `advertisementloop`.
@@ -10,11 +10,26 @@ Live app: https://advertisementloop-eight.vercel.app · Supabase project `uevktz
 - Supabase `apply_migration` shows Shane an approval card. Tell him with SendUserMessage before calling it. After applying, rename the local migration file to the version Supabase recorded (`list_migrations`).
 - Don't claim success without verification. Report what remains unverified.
 
-## Shipped Oct 29 evening
+## Current state (Oct 30)
+- Production = `main` at 719a8e4. Nothing below is deployed.
+- Review branch `integration-review` (draft PR for Codex review): design pass 9779ba4, Codex's reliability patch c5635e6
+  (Higgsfield save recovery, Slack retries, feedback API context, self-contained skill packaging), one-card-per-asset
+  Library fix, the account-based Claude connector (MCP + Supabase OAuth 2.1, built but OFF), Higgsfield
+  Regenerate from approved feedback, and skill/plugin 0.4.0.
+- Applied Oct 30 ~16:10 UTC (approved by Shane): `20261030160941_mcp_oauth_guard`, `20261030161044_higgsfield_revisions`, `20261030161111_claude_revisions`. `app_private.mcp_oauth_config` holds the public client id `eaa7c70b-0947-4842-910e-ca16ebc1ff58`.
+- Non-repo-engine ads (most of the library) are revised in a person's Claude via the connector (`start_revision` … `complete_revision`); the app says so instead of promising the hourly worker.
+- Connector setup steps for Shane are in README › *Claude connector setup*. Do not enable OAuth, register clients,
+  set the hook or env vars without his approval. Never share an admin token in a connector header.
+- The personal-token CLI is now the advanced path (Claude Code). Claude chat needs the connector; until it's on,
+  the skill can't save from chat (it says so and points to the app).
+- Still unverified: a real paid Higgsfield render end-to-end (needs Shane's OK for one 4 s 720p test), the OAuth
+  flow against live Supabase (server is disabled), Claude's handling of the `resource` parameter.
+
+## Shipped Oct 29 evening (history; the asset page has since been redesigned on the review branch)
 - "Only feedback" redesign: migration applied (20261030033828), merged and deployed (fa10d62).
 - Asset page action row is only Share / Download / Approve vN (Shane). Reject ad and Editable source moved into "Copy, checks and file". Iterate, Upload and Suggest buttons removed.
-- Higgsfield for skills: `/api/v1/higgsfield/{generate,status,usage}` (personal token, same code and idempotency as the button). `adstudio.py higgsfield|hf-status|hf-usage`. `yoke-ad-maker` confirms length and seconds-used before each render. The Higgsfield MCP connector can't generate, so skills must never use it for renders.
-- `skills/ad-builder/SKILL.md` rewritten (+ zip). It is an ORG plugin: Shane must republish it; the installed copy still says "Higgsfield isn't connected".
+- Higgsfield for skills: `/api/v1/higgsfield/{generate,status,usage}` (+ `revise` on the review branch). `adstudio.py higgsfield|hf-status|hf-usage|hf-revise`. The skill confirms length and seconds-used before each render. The third-party Higgsfield MCP connector can't generate; skills use Ad Studio's server integration.
+- Skills are packaged by `scripts/package-skills.py` (plugin 0.4.0 on the review branch). Installed copies must be replaced explicitly; publishing to the org needs Shane.
 
 ## Earlier: "only feedback" redesign (now deployed; history below)
 

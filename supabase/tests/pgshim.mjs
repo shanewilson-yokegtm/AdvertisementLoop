@@ -13,6 +13,7 @@ export function pgClient(db) {
       update(row) { st.op = 'update'; st.row = row; return b; },
       upsert(row) { st.op = 'upsert'; st.row = row; return b; },
       eq(k, v) { st.where.push(`${col(k)} = ${q(v)}`); return b; },
+      is(k, v) { st.where.push(`${col(k)} is ${q(v)}`); return b; },
       in(k, vs) { st.where.push(`${col(k)} in (${vs.map(q).join(',')})`); return b; },
       gte(k, v) { st.where.push(`${col(k)} >= ${q(v)}`); return b; },
       match(o) { Object.entries(o).forEach(([k, v]) => b.eq(k, v)); return b; },
@@ -50,19 +51,21 @@ export function pgClient(db) {
     try {
       const named = Object.entries(args).map(([k, v]) => `${k} => ${v === null || v === undefined ? 'null' : Array.isArray(v) || typeof v === 'object' ? q(v) : q(v)}`).join(', ');
       const r = await db.query(`select * from public.${fn}(${named})`);
-      const ret = (await db.query(`select t.typname from pg_proc p join pg_type t on t.oid = p.prorettype where p.proname = '${fn}' limit 1`)).rows[0]?.typname;
+      const { typname: ret, typtype } = (await db.query(`select t.typname, t.typtype from pg_proc p join pg_type t on t.oid = p.prorettype where p.proname = '${fn}' limit 1`)).rows[0] || {};
       const setof = (await db.query(`select proretset from pg_proc where proname = '${fn}' limit 1`)).rows[0]?.proretset;
-      return { data: setof ? r.rows : (ret === 'void' ? null : r.rows[0]), error: null };
+      // Like PostgREST/supabase-js: a scalar (base type) function returns the bare value, a row type returns the row.
+      const one = r.rows[0]; const scalar = typtype === 'b' && ret !== 'void' && one ? Object.values(one)[0] : one;
+      return { data: setof ? r.rows : (ret === 'void' ? null : scalar), error: null };
     } catch (e) { return { data: null, error: { message: String(e.message), code: e.code } }; }
   };
   return {
     from, rpc, objects,
     storage: { from: () => ({
       createSignedUrl: async p => ({ data: { signedUrl: 'https://signed.example/' + p }, error: null }),
-      download: async p => ({ data: new Blob([Buffer.from('fake-video-bytes:' + p)], { type: 'video/mp4' }), error: null }),
+      download: async p => ({ data: new Blob([objects.get(p)?.bytes ?? Buffer.from('fake-video-bytes:' + p)], { type: 'video/mp4' }), error: null }),
       createSignedUrls: async ps => ({ data: ps.map(p => ({ path: p, signedUrl: 'https://signed.example/' + p })), error: null }),
       createSignedUploadUrl: async p => ({ data: { signedUrl: 'https://upload.example/' + p, path: p, token: 't' }, error: null }),
-      upload: async (p, bytes, o) => { if (objects.has(p)) return { data: null, error: { message: 'exists' } }; objects.set(p, { size: bytes.byteLength ?? bytes.size, mimetype: o?.contentType }); return { data: { path: p }, error: null }; },
+      upload: async (p, bytes, o) => { if (objects.has(p)) return { data: null, error: { message: 'exists' } }; objects.set(p, { size: bytes.byteLength ?? bytes.size, mimetype: o?.contentType, bytes }); return { data: { path: p }, error: null }; },
       list: async (folder, o) => ({ data: [...objects.entries()].filter(([k]) => k === folder + '/' + o.search).map(([k, m]) => ({ name: k.split('/').pop(), metadata: m })), error: null }),
     }) },
   };

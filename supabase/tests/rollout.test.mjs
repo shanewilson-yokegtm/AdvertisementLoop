@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
@@ -18,7 +18,7 @@ function source(file, mocks = {}) {
   const module = { exports: {} };
   const localRequire = id => {
     if (id in mocks) return mocks[id];
-    if (id.startsWith('@/')) return source('src/' + id.slice(2) + '.ts', mocks);
+    if (id.startsWith('@/')) { const f = 'src/' + id.slice(2); return source(existsSync(path.join(rootDir, f + '.ts')) ? f + '.ts' : f + '.tsx', mocks); }
     return require(id);
   };
   new Function('require', 'module', 'exports', code)(localRequire, module, module.exports);
@@ -32,6 +32,7 @@ async function mount(Component) {
 }
 async function finish() { await act(async () => root?.unmount()); sessionStorage.clear(); }
 const button = text => [...document.querySelectorAll('button')].find(b => b.textContent === text);
+const buttonStarting = text => [...document.querySelectorAll('button')].find(b => b.textContent.startsWith(text));
 const v1 = { id: 'asset_v1', asset_id: 'asset', version: 1, file_path: 'one.png', poster_path: null, render: { state: 'ready' }, content_type: 'image/png', qa: [], copy: {}, source: {} };
 const v2 = { ...v1, id: 'asset_v2', version: 2, file_path: 'two.png' };
 const asset = { id: 'asset', concept_name: 'Test ad', kind: 'static', format: 'square', latest_version: 1, owner_id: 'shane' };
@@ -44,8 +45,8 @@ function reviewFixture(initial = [v1], query = '') {
   const mocks = {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
     'next/navigation': { useParams: () => ({ id: 'asset' }), useSearchParams: () => new URLSearchParams(query), useRouter: () => ({ replace: url => { query = url.split('?')[1] || ''; render(); }, push: url => { pushed.push(url); } }) },
-    '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {} },
-    '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }) },
+    '@/lib/data': { useRows: table => ({ rows: rows[table], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => () => 'Shane', can: () => true, canManage: (m, a) => m.role === 'admin' || a?.owner_id === m.user_id, fmtDate: () => '', fmtSec: () => '', fmtBytes: () => '', isVideo: () => false, FORMATS: {}, KIND_LABEL: {}, frameLabel: (v, f) => f },
+    '@/components/Process': { __esModule: true, default: () => React.createElement('div', { id: 'process-panel' }), activeProcessing: p => (p && ['approved', 'executing'].includes(p.status) ? p : null) },
     '@/components/ChangeLog': { __esModule: true, default: () => null },
     '@/components/Higgsfield': { useHiggsfieldPoll: () => {} },
     '@/lib/supabase/browser': { sb: () => ({ from: table => ({ insert: async row => { writes.push({ table, ...row }); return { error: null }; }, upsert: async row => { writes.push({ table, ...row }); return { error: null }; }, update: row => ({ eq: async (k, val) => { writes.push({ table, ...row, [k]: val }); return { error: null }; } }) }) }) },
@@ -98,17 +99,19 @@ test('one feedback box: needs text, then saves feedback on the version being vie
   await finish();
 });
 
-test('the action row is only Share, Download, Approve', async () => {
+test('the action row is Approve, Share, Download, with the rest under More', async () => {
   const f = reviewFixture(); await mount(f.Page);
   const row = button('Share').parentElement;
-  assert.deepEqual([...row.querySelectorAll('button')].map(b => b.textContent), ['Share', 'Download', 'Approve v1']);
+  assert.deepEqual([...row.children].filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['Approve v1', 'Share', 'Download']);
+  assert.ok(row.querySelector('summary[aria-label="More actions"]'), 'secondary actions sit behind More');
+  assert.ok(row.querySelector('details .menu').contains(buttonStarting('Reject ad')), 'Reject ad lives in the More menu');
   for (const label of ['Iterate with Claude', 'Upload new version', 'Suggest a change', 'Share for review']) assert.equal(button(label), undefined, label + ' gone');
   await finish();
 });
 
 test('reject removes the ad from the Library', async () => {
   const f = reviewFixture(); await mount(f.Page);
-  await act(async () => button('Reject ad').click());
+  await act(async () => buttonStarting('Reject ad').click());
   assert.deepEqual(f.writes.map(w => [w.table, w.id, w.archived]), [['assets', 'asset', true]]);
   assert.deepEqual(f.pushed, ['/']);
   await finish();
@@ -118,60 +121,93 @@ test('a member who does not own the ad can comment but cannot revise, reject or 
   member = { user_id: 'teng', role: 'creator' };
   const f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
   for (const label of ['Share', 'Download']) assert.ok(button(label), label + ' shown');
-  for (const label of ['Reject ad', 'Revert to v1']) assert.equal(button(label), undefined, label + ' hidden');
+  assert.ok(!buttonStarting('Reject ad'), 'Reject ad hidden'); assert.ok(!button('Revert to v1'), 'Revert hidden');
+  assert.equal(document.querySelectorAll('.decide').length, 0, 'no approve/reject controls on someone else’s ad');
   assert.equal(document.getElementById('process-panel'), null);
   assert.ok(document.getElementById('cmt'), 'comment box available');
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-test('the owner sees Process feedback and can revert an older version', async () => {
+test('the owner sees Regenerate once there is feedback, and can revert an older version', async () => {
   member = { user_id: 'shane', role: 'creator' };
-  const f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
+  let f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
+  assert.equal(document.getElementById('process-panel'), null, 'no Regenerate bar with nothing to act on'); await finish();
+  f = reviewFixture([v1, v2], 'v=asset_v1'); f.rows.comments = [{ id: 'c1', asset_id: 'asset', version_id: v1.id, author: 'teng', body: 'Bigger logo', status: 'open', created_at: '' }]; await mount(f.Page);
   assert.ok(document.getElementById('process-panel'));
   assert.ok(button('Revert to v1'));
   await finish(); member = { user_id: 'shane', role: 'admin' };
 });
 
-// ---------- Owner feedback: Approve / Reject each item, then Process all approved (real component) ----------
-function processFixture(proc, comments) {
+// ---------- Feedback: one thread (approve/reject per item) + one Regenerate ad action (real components) ----------
+const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng', body: 'Shorter headline', status: 'open', created_at: '' };
+const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '', decision: 'approved' };
+const cC = { id: 'c-c', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Louder', status: 'dismissed', created_at: '', resolution_note: 'Sound is fine' };
+const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
+function threadFixture(comments, manage = true, inFlight = []) {
   const calls = [];
-  const Panel = source('src/components/Process.tsx', {
+  const Thread = source('src/components/FeedbackThread.tsx', {
     '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
     '@/lib/data': { fmtDate: () => '', fmtSec: s => String(s) },
   }).default;
-  const props = { a: asset, vs: [v1, v2], comments, proc, reload: () => {}, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, onOpen: () => {}, ownerName: 'Shane' };
-  return { Panel: () => React.createElement(Panel, props), calls };
+  const props = { comments, vs: [v1, v2], manage, inFlight: new Set(inFlight), nextVersion: 3, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, reload: () => {} };
+  return { Thread: () => React.createElement(Thread, props), calls };
 }
-const cA = { id: 'c-a', asset_id: 'asset', version_id: 'asset_v2', author: 'teng', body: 'Shorter headline', status: 'open', created_at: '' };
-const cB = { id: 'c-b', asset_id: 'asset', version_id: 'asset_v1', author: 'henry', body: 'Coral CTA', status: 'open', created_at: '', decision: 'approved' };
-const radio = (i, label) => [...document.querySelectorAll('[role=radio]')].filter(b => b.textContent === label)[i];
-const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
+function regenFixture(proc, comments, { engine = 'creative/clay/engine.js', me = 'shane' } = {}) {
+  const calls = [];
+  const Bar = source('src/components/Process.tsx', {
+    '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
+    '@/lib/data': { fmtDate: () => '' },
+  }).default;
+  const props = { a: asset, vs: [v1, { ...v2, source: engine ? { engine, tool: 'Claude' } : { tool: 'Claude Design' } }], comments, proc, reload: () => {}, toast: () => {}, onOpen: () => {}, me, who: id => ({ teng: 'Teng He', shane: 'Shane' })[id] || 'Someone' };
+  return { Bar: () => React.createElement(Bar, props), calls };
+}
+const decideBtns = label => [...document.querySelectorAll('.decide button')].filter(b => b.textContent === label);
 
-test('Approve and Reject save right away on the item', async () => {
-  const f = processFixture(null, [cA]); await mount(f.Panel);
-  assert.equal(button('Process approved feedback').disabled, true);
+test('owner: Approve and Reject on each item save right away; Approve again undoes', async () => {
+  const f = threadFixture([cA, cB]); await mount(f.Thread);
   assert.equal(f.calls.length, 0, 'opening the ad changes nothing');
-  await act(async () => radio(0, 'Approve').click()); await flush();
-  await act(async () => radio(0, 'Reject').click()); await flush();
-  assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_comment, c.args.p_decision]), [['feedback_decide', 'c-a', 'approved'], ['feedback_decide', 'c-a', 'rejected']]);
+  assert.equal(decideBtns('Approve')[0].getAttribute('aria-pressed'), 'false');
+  assert.equal(decideBtns('Approve')[1].getAttribute('aria-pressed'), 'true');
+  await act(async () => decideBtns('Approve')[0].click()); await flush();
+  await act(async () => decideBtns('Reject')[0].click()); await flush();
+  await act(async () => decideBtns('Approve')[1].click()); await flush();
+  assert.deepEqual(f.calls.map(c => [c.args.p_comment, c.args.p_decision]), [['c-a', 'approved'], ['c-a', 'rejected'], ['c-b', 'undecided']]);
   await finish();
 });
 
-test('Process sends everything approved (server collects it), not a snapshot', async () => {
-  const f = processFixture(null, [cA, cB]); await mount(f.Panel);
-  assert.match(document.body.textContent, /1 approved · 1 not decided/);
-  assert.equal(radio(0, 'Approve').getAttribute('aria-checked'), 'false');
-  assert.equal(radio(1, 'Approve').getAttribute('aria-checked'), 'true');
-  await act(async () => button('Process approved feedback').click()); await flush();
+test('one thread: decided items are kept as history, rejected ones can be undone by the owner', async () => {
+  const f = threadFixture([cA, cB, cC], true, ['c-b']); await mount(f.Thread);
+  assert.equal(decideBtns('Approve').length, 1, 'only undecided, not-in-flight items get controls');
+  const t = document.body.textContent;
+  assert.match(t, /Going into v3/); assert.match(t, /Rejected/); assert.match(t, /Reason: Sound is fine/);
+  await act(async () => button('Undo').click()); await flush();
+  assert.deepEqual(f.calls.map(c => [c.args.p_comment, c.args.p_decision]), [['c-c', 'undecided']]);
+  await finish();
+});
+
+test('teammates read the full attributed thread without decision controls', async () => {
+  const f = threadFixture([cA, cB, cC], false); await mount(f.Thread);
+  assert.equal(document.querySelectorAll('.decide').length, 0); assert.ok(!button('Undo'));
+  const t = document.body.textContent;
+  assert.match(t, /teng/); assert.match(t, /Shorter headline/); assert.match(t, /Waiting for owner/); assert.match(t, /Approved for next version/);
+  await finish();
+});
+
+test('Regenerate ad sends everything approved (server collects it), not a snapshot', async () => {
+  let f = regenFixture(null, [cA]); await mount(f.Bar);
+  assert.equal(button('Regenerate ad').disabled, true, 'nothing approved yet'); await finish();
+  f = regenFixture(null, [cA, cB]); await mount(f.Bar);
+  assert.match(document.body.textContent, /1 approved change → v3/);
+  await act(async () => button('Regenerate ad').click()); await flush();
   assert.deepEqual(f.calls.map(c => [c.fn, c.args.p_asset]), [['feedback_process', 'asset']]);
   await finish();
 });
 
-test('after Process, the owner sees it queued and can cancel before Claude starts', async () => {
+test('after Regenerate, the owner sees it queued (no instant promise) and can cancel before Claude starts', async () => {
   const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'approved', decisions: [{ comment_id: 'c-b', decision: 'apply' }], rev: 4, history: [] };
-  const f = processFixture(proc, [cA, cB]); await mount(f.Panel);
-  assert.match(document.body.textContent, /v3 arrives within the hour/);
-  assert.match(document.body.textContent, /Feedback to decide · 1/, 'item already in the version is not shown again');
+  const f = regenFixture(proc, [cA, cB]); await mount(f.Bar);
+  assert.match(document.body.textContent, /Queued for v3/); assert.match(document.body.textContent, /Claude starts within the hour/);
+  assert.ok(!button('Regenerate ad'), 'no second request while one is queued');
   await act(async () => button('Cancel').click()); await flush();
   assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();
@@ -310,31 +346,202 @@ test('Higgsfield form: 9 s default, 4-12 s, 720p, sound toggle, one request per 
   globalThis.fetch = realFetch; await finish();
 });
 
-test('Library shows one card per concept; approved concepts download every format', async () => {
-  const mk = (id, name, format, status, archived = false) => ({ a: { id, concept_name: name, kind: 'motion', format, archived, owner_id: 'shane' }, v: { id: id + '_v2', asset_id: id, version: 2, file_path: id + '/v2.mp4', poster_path: null, content_type: 'video/mp4', created_at: '2026-10-29T10:00:00Z' }, status });
-  const list = [mk('a1', 'Clay: Credit math', 'feed45', 'approved'), mk('a2', 'Clay: Credit math ', 'vertical', 'approved'),
-    mk('b1', 'Clay: What did it do?', 'vertical', 'changes'), mk('b2', 'Clay: What did it do?', 'feed45', null), mk('c1', 'Old one', 'square', null, true)];
+test('Library: one card per asset; same titles are never merged; counts, links and downloads stay per asset', async () => {
+  const mk = (id, name, format, owner, status, archived = false) => ({ a: { id, concept_name: name, kind: 'motion', format, archived, owner_id: owner }, v: { id: id + '_v2', asset_id: id, version: 2, file_path: id + '/v2.mp4', poster_path: null, content_type: 'video/mp4', created_at: '2026-10-29T10:00:00Z' }, status });
+  // Same title, different owners, and same owner twice: all independent ads.
+  const list = [mk('a1', 'Clay: Credit math', 'feed45', 'shane', 'approved'), mk('a2', 'Clay: Credit math', 'vertical', 'shane', 'approved'),
+    mk('b1', 'Clay: Credit math', 'vertical', 'teng', 'changes'), mk('b2', 'Other', 'feed45', 'teng', null), mk('c1', 'Old one', 'square', 'shane', null, true)];
   const rows = { assets: list.map(x => x.a), versions: list.map(x => x.v), reviews: list.filter(x => x.status).map(x => ({ version_id: x.v.id, status: x.status })), comments: [] };
   const signedFor = [];
   const Page = source('src/app/page.tsx', {
     'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
-    '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useInbox: () => ({ rows: [] }), can: () => true,
-      FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {} },
+    '@/lib/data': { useRows: t => ({ rows: rows[t], ready: true, reload: () => {} }), useSigned: () => ({}), useMembers: () => id => ({ shane: 'Shane', teng: 'Teng' })[id] || 'Teammate',
+      useInbox: (scope, on = true) => ({ rows: scope === 'all' && on ? [{ asset_id: 'b1', pending: 2 }] : [] }), can: () => true,
+      FORMATS: { feed45: { label: '4:5' }, vertical: { label: '9:16' }, square: { label: '1:1' } }, KIND_LABEL: {}, frameLabel: (v, f) => ({ feed45: '4:5', vertical: '9:16', square: '1:1' })[f] },
     '@/lib/supabase/browser': { sb: () => ({ storage: { from: () => ({ createSignedUrl: async (p, _s, o) => { signedFor.push([p, o.download]); return { data: { signedUrl: 'about:blank#' + p } }; } }) } }) },
     '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
     '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: s => React.createElement('span', null, s), renderChip: () => null },
   }).default;
   await mount(Page);
-  const titles = () => [...document.querySelectorAll('.grid:not(details .grid) .card .t')].map(e => e.textContent);
-  assert.deepEqual(titles().sort(), ['Clay: Credit math', 'Clay: What did it do?'], 'two concepts, not four format cards');
-  assert.deepEqual([...document.querySelectorAll('.card')][0].querySelector('a').getAttribute('href').startsWith('/a/'), true);
-  const fmts = t => [...[...document.querySelectorAll('.card')].find(c => c.querySelector('.t').textContent === t).querySelectorAll('[aria-label="Formats"] a')].map(e => e.textContent);
-  assert.deepEqual(fmts('Clay: Credit math'), ['9:16', '4:5'], '9:16 listed first');
-  assert.ok(button('Approved · 1') && button('Changes requested · 1') && button('All · 2'));
-  await act(async () => button('Approved · 1').click());
-  assert.deepEqual(titles(), ['Clay: Credit math']);
-  await act(async () => { button('Download all').click(); await new Promise(r => setTimeout(r, 1000)); });
-  assert.deepEqual(signedFor.map(x => x[0]), ['a2/v2.mp4', 'a1/v2.mp4']);
+  const cards = () => [...document.querySelectorAll('.grid:not(details .grid) .card')];
+  const hrefs = () => cards().map(c => c.querySelector('a').getAttribute('href')).sort();
+  assert.deepEqual(hrefs(), ['/a/a1', '/a/a2', '/a/b1', '/a/b2'], 'four separate ads; the archived one is not in the main grid');
+  assert.match(cards().find(c => c.querySelector('a').getAttribute('href') === '/a/b1').querySelector('.sub').textContent, /Teng · 9:16/, 'owner and format on each card');
+  const pick = label => [...document.querySelectorAll('[role=radio]')].find(b => b.textContent.startsWith(label));
+  const views = [...document.querySelectorAll('[role=radiogroup][aria-label="Show"] [role=radio]')].map(b => b.textContent);
+  assert.deepEqual(views, ['All4', 'Feedback for you0', 'Approved2'], 'three views, not a wall of status pills');
+  await act(async () => pick('Approved').click());
+  assert.deepEqual(hrefs(), ['/a/a1', '/a/a2']);
+  await act(async () => { [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Download Clay: Credit math, 9:16').click(); await new Promise(r => setTimeout(r, 0)); });
+  assert.deepEqual(signedFor.map(x => x[0]), ['a2/v2.mp4'], 'downloads exactly that asset');
   assert.match(signedFor[0][1], /Clay Credit math 9x16\.mp4/);
+  // Feedback is personal by default; an admin widens it deliberately. Counts belong to the one asset.
+  await act(async () => pick('Feedback for you').click());
+  assert.deepEqual(hrefs(), [], 'nothing waiting on Shane personally');
+  await act(async () => pick('Everyone’s').click());
+  assert.deepEqual(hrefs(), ['/a/b1'], 'only the asset with feedback, not its same-title neighbours');
+  assert.equal(document.querySelector('.count').textContent, '2');
+  await act(async () => pick('All').click());
+  assert.ok(!pick('Everyone’s'), 'scope control only in the feedback view');
+  const search = document.querySelector('input[type=search]'); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  await act(async () => { setter.call(search, 'teng'); search.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  assert.deepEqual(hrefs(), ['/a/b1', '/a/b2'], 'search matches owners too');
+  await finish();
+});
+
+test('Library: members see no admin scope control', async () => {
+  member = { user_id: 'teng', role: 'creator' };
+  const Page = source('src/app/page.tsx', {
+    'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) },
+    '@/lib/data': { useRows: () => ({ rows: [], ready: true }), useSigned: () => ({}), useMembers: () => () => '', useInbox: () => ({ rows: [] }), can: () => true, FORMATS: {}, frameLabel: () => '' },
+    '@/lib/supabase/browser': { sb: () => ({}) }, '@/components/Media': { Thumb: () => null }, '@/components/Shell': { useApp: () => ({ member }) },
+    '@/components/Upload': { __esModule: true, default: () => null }, '@/components/Chips': { statusChip: () => null, renderChip: () => null },
+  }).default;
+  await mount(Page);
+  await act(async () => [...document.querySelectorAll('[role=radio]')].find(b => b.textContent.startsWith('Feedback for you')).click());
+  assert.equal([...document.querySelectorAll('[role=radio]')].find(b => b.textContent.startsWith('Everyone')), undefined);
+  assert.match(document.body.textContent, /No ads yet/);
+  assert.equal([...document.querySelectorAll('a')].filter(a => a.textContent === 'Create an ad').length, 1, 'one Create call to action');
+  await finish(); member = { user_id: 'shane', role: 'admin' };
+});
+
+test('account menu holds role, Connect Claude and Sign out; Escape closes it', async () => {
+  const { AccountMenu } = source('src/components/Shell.tsx', {
+    'next/link': { __esModule: true, default: p => React.createElement('a', p, p.children) }, 'next/navigation': { usePathname: () => '/' },
+    '@/lib/data': { useMember: () => ({}), useInbox: () => ({ rows: [] }) }, '@/lib/supabase/browser': { sb: () => ({}) }, './Feedback': { __esModule: true, default: () => null },
+  });
+  await mount(() => React.createElement(AccountMenu, { member: { user_id: 'teng', email: 'teng@yokegtm.com', display_name: 'Teng He', role: 'creator' }, email: null }));
+  const toggle = document.querySelector('.acct > button');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false'); assert.equal(document.querySelector('.menu'), null);
+  await act(async () => toggle.click());
+  const t = document.querySelector('.menu').textContent;
+  assert.match(t, /Teng He/); assert.match(t, /Creator/); assert.match(t, /Connect Claude/); assert.match(t, /Sign out/);
+  assert.equal(document.querySelector('.menu a[href="/connect"]').getAttribute('role'), 'menuitem');
+  await act(async () => { document.querySelector('.acct').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  assert.equal(document.querySelector('.menu'), null);
+  await finish();
+});
+
+// ---------- Claude connector consent + sign-in that keeps authorization_id ----------
+function consentFixture(details, known = ['claude-connector']) {
+  const calls = []; let assigned = null;
+  const { Consent } = source('src/components/Consent.tsx', {
+    '@/lib/supabase/browser': { sb: () => ({ auth: { oauth: {
+      getAuthorizationDetails: async id => { calls.push(['details', id]); return { data: details, error: null }; },
+      approveAuthorization: async (id, o) => { calls.push(['approve', id, o]); return { data: { redirect_url: 'https://claude.ai/api/mcp/auth_callback?code=c&state=s' }, error: null }; },
+      denyAuthorization: async (id, o) => { calls.push(['deny', id, o]); return { data: { redirect_url: 'https://claude.ai/api/mcp/auth_callback?error=access_denied' }, error: null }; },
+    } } }) },
+    '@/components/Shell': { useApp: () => ({ member: { user_id: 'teng', display_name: 'Teng He', role: 'creator' } }), roleLabel: r => r },
+  });
+  return { Comp: () => React.createElement(Consent, { authorizationId: 'auth-123', known, go: u => { assigned = u; } }), calls, assigned: () => assigned };
+}
+const det = cid => ({ authorization_id: 'auth-123', redirect_uri: 'https://claude.ai/api/mcp/auth_callback', scope: 'openid email', client: { id: cid, name: 'Claude', uri: 'https://claude.ai', logo_uri: '' }, user: { id: 'teng', email: 'teng@yokegtm.com' } });
+
+test('consent: the registered connector shows what it can do as you, and Allow approves this request only', async () => {
+  const f = consentFixture(det('claude-connector')); await mount(f.Comp); await flush();
+  const t = document.body.textContent;
+  assert.match(t, /Connect Claude to Ad Studio\?/); assert.match(t, /claude\.ai/); assert.match(t, /Teng He/);
+  assert.match(t, /Paid Higgsfield video and Slack posts still ask you/);
+  await act(async () => button('Allow').click()); await flush();
+  assert.deepEqual(f.calls.map(c => c.slice(0, 2)), [['details', 'auth-123'], ['approve', 'auth-123']]);
+  assert.equal(f.calls[1][2].skipBrowserRedirect, true);
+  assert.match(f.assigned(), /^https:\/\/claude\.ai\/api\/mcp\/auth_callback\?code=/);
+  await finish();
+});
+
+test('consent: an unknown OAuth client can only be denied', async () => {
+  const f = consentFixture(det('rogue-client')); await mount(f.Comp); await flush();
+  assert.match(document.body.textContent, /isn’t the Ad Studio Claude connector/);
+  assert.ok(!button('Allow'), 'no Allow for unregistered clients');
+  await act(async () => button('Deny').click()); await flush();
+  assert.deepEqual(f.calls.map(c => c[0]), ['details', 'deny']);
+  await finish();
+});
+
+test('consent: an already-approved request returns to Claude without asking again', async () => {
+  const f = consentFixture({ redirect_url: 'https://claude.ai/api/mcp/auth_callback?code=again' }); await mount(f.Comp); await flush();
+  assert.equal(f.assigned(), 'https://claude.ai/api/mcp/auth_callback?code=again');
+  assert.equal(f.calls.length, 1);
+  await finish();
+});
+
+test('sign-in keeps the full consent URL, query included', () => {
+  const { loginRedirect } = source('src/lib/login-redirect.ts');
+  const u = loginRedirect(new URL('https://studio.example/oauth/consent?authorization_id=abc-123&x=1'));
+  assert.equal(u.pathname, '/login');
+  assert.equal(u.searchParams.get('next'), '/oauth/consent?authorization_id=abc-123&x=1');
+  assert.equal(loginRedirect(new URL('https://studio.example/')).search, '');
+});
+
+test('magic-link callback returns only to same-origin paths, query kept', async () => {
+  const redirects = [];
+  const mod = source('src/app/auth/callback/route.ts', {
+    'next/server': { NextResponse: { redirect: u => { redirects.push(String(u)); return { status: 307 }; } } },
+    '@/lib/supabase/server': { userClient: async () => ({ auth: { exchangeCodeForSession: async () => ({ error: null }) } }) },
+  });
+  for (const next of ['/oauth/consent?authorization_id=abc', '//evil.example/x', '/\\evil.example/x', 'https://evil.example', '/%0d%0aLocation:x']) {
+    await mod.GET({ url: 'https://studio.example/auth/callback?code=c&next=' + encodeURIComponent(next) });
+  }
+  assert.deepEqual(redirects, ['https://studio.example/oauth/consent?authorization_id=abc', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/', 'https://studio.example/%0d%0aLocation:x']);
+});
+
+test('frame labels report the real media frame, not the preset name', () => {
+  const { frameLabel } = source('src/lib/data.ts', { './supabase/browser': { sb: () => ({}) } });
+  assert.equal(frameLabel({ width: 720, height: 960 }, 'feed45'), '3:4', 'a feed preset rendered at 3:4 is labelled 3:4');
+  assert.equal(frameLabel({ width: 1080, height: 1350 }, 'feed45'), '4:5');
+  assert.equal(frameLabel({ width: 1280, height: 720 }, 'landscape'), '16:9', 'Higgsfield landscape is 16:9, not 1.91:1');
+  assert.equal(frameLabel({ width: 720, height: 1280 }, 'vertical'), '9:16');
+  assert.equal(frameLabel({ width: null, height: null }, 'feed45'), '4:5', 'no media yet: the preset');
+  assert.equal(frameLabel({ width: 1000, height: 700 }, 'square'), '1000×700', 'unknown ratios show the real size');
+});
+
+test('Higgsfield ads regenerate in Higgsfield only after an explicit paid-render confirmation', async () => {
+  const calls = []; const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { calls.push([String(url), init?.body ? JSON.parse(init.body) : null]); return new Response(JSON.stringify(String(url).includes('usage') ? { seconds_this_month: 54, monthly_cap_seconds: 300 } : { processing_id: 'p', job_id: 'j', status: 'submitted' }), { status: 200 }); };
+  const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({ rpc: async () => ({ error: null }) }) }, '@/lib/data': { fmtDate: () => '' } }).default;
+  const hv = { ...v1, file_path: 'a.mp4', render: { state: 'ready' }, spec: { type: 'higgsfield', duration: 6, aspect_ratio: '3:4', audio: false, prompt: 'p' } };
+  const cOk = { id: 'c1', status: 'open', decision: 'approved', body: 'Heavier rain' };
+  await mount(() => React.createElement(Bar, { a: asset, vs: [hv], comments: [cOk], proc: null, reload: () => {}, toast: () => {}, onOpen: () => {} }));
+  assert.ok(!button('Regenerate ad'), 'no worker regenerate for a Higgsfield video');
+  await act(async () => button('Regenerate in Higgsfield').click()); await flush();
+  assert.equal(calls.filter(c => c[0].includes('revise')).length, 0, 'nothing paid on the first press');
+  assert.match(document.body.textContent, /Paid render: 6s · 3:4 · no sound · 54s used this month of 300/);
+  await act(async () => button('Render v2').click()); await flush();
+  const rev = calls.filter(c => c[0].includes('/api/higgsfield/revise'));
+  assert.equal(rev.length, 1); assert.equal(rev[0][1].confirm, true); assert.equal(rev[0][1].asset_id, 'asset');
+  globalThis.fetch = realFetch; await finish();
+});
+
+test('a Higgsfield regenerate in progress says so honestly, with no cancel and any unclear outcome shown', async () => {
+  const Bar = source('src/components/Process.tsx', { '@/lib/supabase/browser': { sb: () => ({}) }, '@/lib/data': { fmtDate: () => '' } }).default;
+  const proc = { id: 'p', reviewed_version_id: 'asset_v1', comment_ids: ['c1'], status: 'executing', engine: 'higgsfield', rev: 1, message: 'Higgsfield’s answer was unclear, so it may be rendering.' };
+  await mount(() => React.createElement(Bar, { a: asset, vs: [v1], comments: [], proc, reload: () => {}, toast: () => {}, onOpen: () => {} }));
+  assert.match(document.body.textContent, /Rendering v2 in Higgsfield/); assert.match(document.body.textContent, /frozen when you pressed Regenerate/);
+  assert.match(document.body.textContent, /answer was unclear/);
+  assert.ok(!button('Cancel') && !button('Regenerate in Higgsfield'));
+  await finish();
+});
+
+test('an ad the worker can’t rebuild offers Continue in Claude instead of promising a result within the hour', async () => {
+  const f = regenFixture(null, [cB], { engine: null }); await mount(f.Bar);
+  assert.ok(!button('Regenerate ad'), 'no worker button for a Claude Design ad');
+  assert.ok(button('Continue in Claude'));
+  const t = document.body.textContent;
+  assert.match(t, /made in Claude Design, which the hourly worker can’t rebuild/); assert.match(t, /only the approved items/);
+  assert.doesNotMatch(t, /within the hour/);
+  assert.equal(f.calls.length, 0, 'nothing queued');
+  await finish();
+});
+
+test('a run being made in someone’s Claude says who and since when; only they can cancel', async () => {
+  const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'executing', engine: 'claude', claimed_by: 'teng', claimed_at: '2026-10-30T15:00:00Z', rev: 2 };
+  let f = regenFixture(proc, [cA, cB]); await mount(f.Bar);
+  assert.match(document.body.textContent, /Teng He is making v3 in Claude/); assert.ok(!button('Cancel'), 'an admin can’t cancel someone else’s claim from here');
+  assert.ok(!button('Regenerate ad') && !button('Continue in Claude'));
+  await finish();
+  f = regenFixture(proc, [cA, cB], { me: 'teng' }); await mount(f.Bar);
+  assert.match(document.body.textContent, /You’re making v3 in Claude/);
+  await act(async () => button('Cancel').click()); await flush();
+  assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();
 });

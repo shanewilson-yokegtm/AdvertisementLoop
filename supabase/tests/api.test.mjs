@@ -88,6 +88,13 @@ ok('Henry cannot start processing Teng’s feedback', (await call('henry', 'POST
 r = await call('henry', 'POST', `assets/${A}/comments`, { version_id: `${A}_v1`, body: 'Shorter headline', author: TENG });
 ok('Henry comments, attributed to Henry (author in body ignored)', r.status === 200 && (await db.query(`select author, source from comments where id='${r.data.id}'`)).rows[0].author === HENRY);
 await call('shane', 'POST', `assets/${A}/comments`, { version_id: `${A}_v1`, body: 'Use coral CTA' });
+const feedbackId = (await db.query(`select id from comments where asset_id=$1 and body='Shorter headline'`, [A])).rows[0].id;
+await call('teng', 'POST', `assets/${A}/feedback/${feedbackId}/decide`, { decision: 'approved' });
+const feedbackContext = (await call('teng', 'GET', `assets/${A}`)).data.comments.find(c => c.id === feedbackId);
+ok('Claude can see the saved feedback decision and decision author', feedbackContext.decision === 'approved' && feedbackContext.decided_by === TENG && feedbackContext.decided_at);
+await db.query(`update comments set deleted_at=now(), edited_at=now() where id=$1`, [feedbackId]);
+ok('Claude can distinguish deleted feedback from actionable comments', (await call('teng', 'GET', `assets/${A}`)).data.comments.find(c => c.id === feedbackId).deleted_at);
+await db.query(`update comments set deleted_at=null where id=$1`, [feedbackId]);
 ok('Teng’s inbox shows his ad; Henry’s does not', (await call('teng', 'GET', 'inbox')).data.items[0]?.pending === 2 && (await call('henry', 'GET', 'inbox')).data.items.length === 0);
 ok('members cannot open the admin queue', (await call('henry', 'GET', 'inbox', null, 'scope=all')).status === 403);
 ok('Shane’s admin queue includes Teng’s ad', (await call('shane', 'GET', 'inbox', null, 'scope=all')).data.items.some(i => i.asset_id === A));

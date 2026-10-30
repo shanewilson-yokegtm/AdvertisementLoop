@@ -11,6 +11,17 @@ export type Review = { version_id: string; status: 'approved' | 'changes'; note:
 export const FORMATS: Record<string, { label: string; w: number; h: number }> = {
   square: { label: '1:1', w: 1080, h: 1080 }, feed45: { label: '4:5', w: 1080, h: 1350 }, vertical: { label: '9:16', w: 1080, h: 1920 }, landscape: { label: '1.91:1', w: 1200, h: 628 },
 };
+/** The frame the media really has (from its stored size), falling back to the ad's format preset. Never claims 4:5 for a 3:4 render. */
+export function frameLabel(v: { width?: number | null; height?: number | null } | null | undefined, format: string) {
+  const w = v?.width, h = v?.height;
+  if (w && h) {
+    const r = w / h;
+    const known: [number, string][] = [[9 / 16, '9:16'], [3 / 4, '3:4'], [4 / 5, '4:5'], [1, '1:1'], [16 / 9, '16:9'], [1.91, '1.91:1']];
+    const hit = known.find(([k]) => Math.abs(r - k) / k < 0.015);
+    return hit ? hit[1] : `${w}×${h}`;
+  }
+  return FORMATS[format]?.label || format;
+}
 export const KIND_LABEL: Record<string, string> = { static: 'Static', motion: 'Motion', video: 'Video' };
 export const ROLE_RANK = ['none', 'viewer', 'creator', 'approver', 'admin'];
 export const can = (m: Member | null, min: string) => !!m && ROLE_RANK.indexOf(m.role) >= ROLE_RANK.indexOf(min);

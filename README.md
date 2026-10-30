@@ -41,12 +41,18 @@ Nothing here uses Rumi or other Yoke production systems.
 - Every ad has an owner (its creator). Only the owner or an admin can add versions, revert, reject, share to Slack, resolve feedback, or read its review drafts and working chats. Everyone can read and comment. Approval stays with approvers. All of this is enforced in the database (`supabase/migrations/*ownership_processing*`).
 - **Feedback to process**: each owner's pending feedback (server-computed `feedback_inbox`), with an admin view of everyone's.
 - **Process feedback** opens one shared review record (`processing`), used by the app and by each person's Claude. Nothing changes until someone picks decisions and executes. Saves are checked against the current version; conflicts are surfaced, never overwritten.
-- **Execute changes** in the app queues the revision worker (scheduled Claude session, hourly, playbook in `creative/REVISIONS.md`). In Claude, the person approves and the result is saved directly.
+- **Regenerate ad** in the app freezes the approved items (text, author, version, time) and queues the revision worker (scheduled Claude session, hourly, playbook in `creative/REVISIONS.md`); Slack edits after that don't change the job. For a finished Higgsfield video the button is **Regenerate in Higgsfield**: one paid, confirmed render in the app server (see below), not the worker.
 
 ## Claude skill and API
 
-- Skill package: `skills/yoke-ad-maker/` (zip: `skills/yoke-ad-maker.zip`). Helper: `scripts/adstudio.py`.
-- API: `/api/v1/*`, authenticated with a personal token from **Connect Claude** (stored hashed, revocable). Needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel; all writes still go through owner/admin checks as the token's member.
+- Installable skill: `skills/ad-builder.zip` contains the complete workflow, helper and brand resources; no second skill is required. `skills/yoke-ad-maker/` is the maintained source and compatibility package. Rebuild both skills and the single-entry plugin with `python3 scripts/package-skills.py`. Replacing code in GitHub does not update an already-installed Claude skill: use its **Replace** action and verify the installed contents target this live app, not the retired Claude artifact.
+- **Revisions in your own Claude:** the hourly worker can only rebuild repo-engine ads (`source.engine` = `creative/...`).
+  For everything else the app shows **Continue in Claude**, and the connector's `start_revision` claims the run (atomic
+  against the worker and other people; stale claims only by explicit take-over), returns only the frozen approved items
+  and the exact parent, then `save_version` (with `processing_id`) and `complete_revision` / `fail_revision` close it
+  through the same processing rules. Migration `20261030161111_claude_revisions`.
+- **Claude connector (recommended, built but off until approved):** remote MCP at `/api/mcp`, signed in per person through Supabase Auth's OAuth 2.1 server with explicit consent at `/oauth/consent`. Tools call the same API rules as the app, as that member. See *Claude connector setup* below.
+- API: `/api/v1/*`, authenticated with a personal token from **Connect Claude › Advanced** (stored hashed, revocable). For Claude Code and scripts that keep secrets in their own environment. Needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel; all writes still go through owner/admin checks as the token's member.
 - Tests: `npm test` (database rules, API, Slack, UI) and `npm run test:e2e` (skill helper -> API -> database with real file bytes).
 
 ## Slack review threads
@@ -60,7 +66,7 @@ Nothing here uses Rumi or other Yoke production systems.
 
 - **Claude in Create an ad**: needs `ANTHROPIC_API_KEY` (Anthropic API, billed separately). Without it, conversations and type choices are saved but Claude doesn't reply.
 - **Share to Slack**: needs a Yoke Slack app with `chat:write` and its bot token in `SLACK_BOT_TOKEN`; invite the bot to the review channel. Without it, Share copies a ready-to-paste message.
-- **Higgsfield video**: not connected. Choosing it saves the idea as a pending Library item and says why.
+- **Higgsfield video**: on when `HF_CREDENTIALS` is set in Vercel (see below); otherwise choosing it saves the idea as a pending Library item and says why.
 
 ## Develop
 
@@ -94,3 +100,41 @@ Create an ad → **Higgsfield video**. Any creator can generate. Settings are fi
   into Supabase storage and filled into that same version exactly once. Moderated, failed or out-of-credit requests
   show "Render failed" with the reason; nothing is called a success unless a real MP4 arrived.
 - Usage (seconds this month) shows under the form. Optional cap: set `HIGGSFIELD_MONTHLY_SECONDS` in Vercel.
+- Only a 4xx is a refusal. A timeout, an HTTP 5xx, or a 2xx with no request id is an *unknown outcome*: the job and its
+  usage stay reserved, the version stays Rendering, and nothing is retried. Check the Higgsfield dashboard first.
+- A new version of an existing video ad keeps that ad's frame; asking for another format is refused. Labels show the
+  real media frame: the feed preset renders 3:4, landscape renders 16:9.
+- **Regenerate in Higgsfield** (owner/admin): freezes the approved feedback, renders once on the newest finished
+  version with its length/frame/sound, and marks the feedback applied only after the MP4 and version are saved.
+  A refused render fails the run and leaves the feedback approved; a repeated press never pays twice: an atomic claim
+  (`higgsfield_revision_claim`) lets exactly one caller create the version and submit; a second press says
+  "already starting" and never closes the run. A claim is retaken only if stale (2 min) with no job.
+
+## Claude connector setup (needs Shane's approval; nothing below is enabled by the code)
+
+The connector is per person: each member signs in with their own Yoke account and approves it once. No shared token.
+
+1. Apply migrations `20261030160941_mcp_oauth_guard`, `20261030161044_higgsfield_revisions` and `20261030161111_claude_revisions` (Supabase approval card).
+   The guard makes OAuth connector tokens useless against the Data API, Storage and Realtime (PostgREST pre-request
+   check + restrictive RLS on every table), so the connector can only act through `/api/mcp`.
+2. Supabase › Authentication › OAuth Server: enable it; **Authorization Path** `/oauth/consent` (Site URL must be the app
+   URL); leave **Dynamic client registration off**.
+3. Register one OAuth client: name `Claude`, type **public** (no secret, PKCE), redirect URI
+   `https://claude.ai/api/mcp/auth_callback`. Copy its client id.
+4. SQL: `update app_private.mcp_oauth_config set resource = '<APP_URL>/api/mcp', client_ids = '{<client id>}';`
+5. Supabase › Authentication › Hooks › Custom Access Token: `public.mcp_access_token_hook`. It changes `aud` only for
+   OAuth tokens (registered client → the MCP URL; anything else → an audience nothing accepts). Browser sessions are
+   unchanged.
+6. Vercel env (Production): `MCP_CONNECTOR_ENABLED=true`, `MCP_OAUTH_CLIENT_IDS=<client id>`,
+   `NEXT_PUBLIC_MCP_OAUTH_CLIENT_IDS=<client id>`, and `APP_URL` (already set). Redeploy. Leave `MCP_ALLOWED_ORIGINS`
+   unset unless a browser-based MCP client must call the endpoint; it takes exact `https://host` origins only.
+7. Claude › Organization settings › Connectors › Add › Custom › Web: URL `<APP_URL>/api/mcp`, **Use your own OAuth
+   client**, client id from step 3, secret blank. Members then press **Connect** under Customize › Connectors.
+   Suggested: set `higgsfield_generate`, `higgsfield_regenerate` and `post_to_slack` to **Ask** in tool permissions.
+
+Checks the endpoint makes on every call: ES256/RS256 signature from the project JWKS, issuer, audience = the MCP URL,
+registered client id, `role=authenticated`, the Supabase session still exists (Disconnect is immediate), and the
+member's current role. Discovery: `/.well-known/oauth-protected-resource/api/mcp` → Supabase Auth.
+Before any of that, a request carrying an `Origin` header must match the allowlist exactly (the app's own origin, plus
+`MCP_ALLOWED_ORIGINS`), or it gets 403 (MCP DNS-rebinding rule). Requests without `Origin` (Claude's servers) go on to
+the token checks. No CORS headers are sent.
