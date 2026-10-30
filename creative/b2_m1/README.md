@@ -19,3 +19,8 @@ Drawn in canvas, rendered to MP4 (30 fps, H.264, silent). No generation credits.
 First rendered version from this engine. Both approved notes on v1: sticky-note pile-up around "Is this your follow-up
 strategy?" (newer note's line kept over "Still using sticky notes for follow-up?"); at the pop a Yoke badge slams down on
 the pile and blasts the notes off the screen; tagline end card.
+
+## v3 (job 52b7f974, review b0acecaf)
+
+No checkbox in the top-left of the Post-its. The Yoke logo never leaves: after the smash the white pill drops away and
+the logo glides (7.9-9.0s) into its end-card spot, where it stays; the end card no longer fades its own logo in.

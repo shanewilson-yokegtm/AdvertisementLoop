@@ -89,9 +89,8 @@ function drawNote(ctx, n, t) {
   ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const fs = 44; ctx.font = `600 ${fs}px ${FONT}`;
   const lines = wrap(ctx, n.text, sz - 70);
-  // checkbox
-  ctx.strokeStyle = 'rgba(17,19,23,0.55)'; ctx.lineWidth = 4; roundRect(ctx, -sz / 2 + 34, -sz / 2 + 44, 34, 34, 6); ctx.stroke();
-  lines.forEach((l, i) => ctx.fillText(l, -sz / 2 + 34, -sz / 2 + 140 + i * fs * 1.15));
+  // v3 (review b0acecaf): no checkbox in the corner; text starts higher
+  lines.forEach((l, i) => ctx.fillText(l, -sz / 2 + 34, -sz / 2 + 104 + i * fs * 1.15));
   ctx.restore();
 }
 
@@ -113,10 +112,7 @@ function drawEndCard(ctx, te, logo) {
   const l = [['Yoke keeps the list.', 0.0], ['And drafts the message.', 0.55]];
   ctx.font = `700 80px ${FONT}`;
   l.forEach(([s, at], i) => { const k = seg(te, at, at + 0.45); ctx.globalAlpha = eo(k); ctx.fillStyle = C.ink; ctx.fillText(s, x0 + lerp(30, 0, eo(k)), 680 + i * 94); });
-  // 2) Logo + promise + CTA
-  const lk = seg(te, 1.6, 2.2); ctx.globalAlpha = eo(lk);
-  const lw = 460, lh = lw * (102 / 401.59), ls = lerp(0.9, 1, eob(lk, 1.6));
-  ctx.save(); ctx.translate(x0, 1010 + lh / 2); ctx.scale(ls, ls); ctx.drawImage(logo, 0, -lh / 2, lw, lh); ctx.restore();
+  // 2) Promise + CTA. The logo is already in place: it carried over from the smash (drawLogo).
   ctx.font = `700 88px ${FONT}`;
   const p = [['Follow-ups that don’t', 2.0], ['depend on memory.', 2.15]];
   p.forEach(([s, at], i) => { const k = seg(te, at, at + 0.45); ctx.globalAlpha = eo(k); ctx.fillStyle = i ? C.coral : C.ink; ctx.fillText(s, x0 + lerp(30, 0, eo(k)), 1290 + i * 100); });
@@ -131,28 +127,47 @@ function drawEndCard(ctx, te, logo) {
 function drawFrame(canvas, t, logo) {
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
-  if (t >= T.card) { drawEndCard(ctx, t - T.card, logo); return; }
+  if (t >= T.card) { drawEndCard(ctx, t - T.card, logo); drawLogo(ctx, t, logo); return; }
   ctx.fillStyle = C.canvas; ctx.fillRect(0, 0, W, H);
   drawHook(ctx, t);
   NOTES.forEach(n => drawNote(ctx, n, t));
   drawYokeSmash(ctx, t, logo);
+  drawLogo(ctx, t, logo);
+}
+
+// v3 (review b0acecaf): the Yoke logo never disappears. After the smash the pill drops away and the logo glides
+// into its end-card spot (left-aligned under the first lines), where it stays to the end.
+const LOGO = { lw: 470, endW: 460, endX: 90, endY: 1010, pillOut: [7.9, 8.35], move: [8.0, 9.0] };
+function logoPose(t) {
+  const d = t - (T.pop - 0.32); if (d < 0) return null;
+  const drop = eo(seg(t, T.pop - 0.32, T.pop)), hit = t - T.pop;
+  const sq = hit > 0 ? 1 + Math.exp(-hit * 9) * Math.sin(hit * 30) * 0.12 : 1;
+  const m = eo(seg(t, LOGO.move[0], LOGO.move[1]));
+  const ew = LOGO.endW, eh = ew * (102 / 401.59);
+  return { cx: lerp(W / 2, LOGO.endX + ew / 2, m), cy: lerp(lerp(-260, H / 2, drop * drop), LOGO.endY + eh / 2, m),
+    w: lerp(LOGO.lw, ew, m), sq: lerp(sq, 1, m) };
+}
+function drawLogo(ctx, t, logo) {
+  const p = logoPose(t); if (!p) return;
+  const lh = p.w * (102 / 401.59);
+  ctx.save(); ctx.globalAlpha = 1; ctx.translate(p.cx, p.cy); ctx.scale(p.sq, 2 - p.sq);
+  ctx.drawImage(logo, -p.w / 2, -lh / 2, p.w, lh); ctx.restore();
 }
 
 // v2 (job e750a027, review 0bac038e): Yoke drops in on top of the pile and smashes it; the notes pop off the screen.
 function drawYokeSmash(ctx, t, logo) {
-  const t0 = T.pop - 0.32, d = t - t0; if (d < 0 || t > T.fallEnd) return;
+  const t0 = T.pop - 0.32, d = t - t0; if (d < 0 || t > LOGO.pillOut[1]) return;
   const drop = eo(seg(t, t0, T.pop)), hit = t - T.pop;
-  const out = seg(t, T.fallEnd - 0.5, T.fallEnd);
+  const out = eo(seg(t, LOGO.pillOut[0], LOGO.pillOut[1])); // pill drops away; the logo stays (drawLogo)
   const cx = W / 2, cy = lerp(-260, H / 2, drop * drop);
   // impact ring
   if (hit > 0 && hit < 0.6) { ctx.save(); ctx.strokeStyle = C.coral; ctx.globalAlpha = 1 - hit / 0.6; ctx.lineWidth = 26 * (1 - hit / 0.6) + 4;
     ctx.beginPath(); ctx.ellipse(cx, H / 2, 200 + hit * 1500, (200 + hit * 1500) * 0.9, 0, 0, 7); ctx.stroke(); ctx.restore(); }
   const sq = hit > 0 ? 1 + Math.exp(-hit * 9) * Math.sin(hit * 30) * 0.12 : 1;
   const bw = 700, bh = 250;
-  ctx.save(); ctx.globalAlpha = 1 - out; ctx.translate(cx, cy); ctx.scale(sq * lerp(1, 0.8, out), (2 - sq) * lerp(1, 0.8, out));
+  ctx.save(); ctx.globalAlpha = 1 - out; ctx.translate(cx, cy + out * 220); ctx.scale(sq * lerp(1, 1.08, out), (2 - sq) * lerp(1, 1.08, out));
   ctx.save(); ctx.filter = 'blur(24px)'; ctx.fillStyle = 'rgba(40,30,10,0.35)'; roundRect(ctx, -bw / 2 + 10, -bh / 2 + 30, bw, bh, bh / 2); ctx.fill(); ctx.restore();
   ctx.fillStyle = C.paper; roundRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2); ctx.fill(); ctx.lineWidth = 8; ctx.strokeStyle = C.ink; ctx.stroke();
-  const lw = 470, lh = lw * (102 / 401.59); ctx.drawImage(logo, -lw / 2, -lh / 2, lw, lh);
   ctx.restore();
 }
 window.drawFrame = drawFrame; window.TOTAL = T.total;
