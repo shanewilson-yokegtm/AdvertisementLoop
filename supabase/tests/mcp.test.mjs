@@ -157,6 +157,83 @@ ok('paid generation refused without explicit person_confirmed', noConfirm.isErro
 const falseConfirm = await cT.callTool({ name: 'post_to_slack', arguments: { asset_id: asset.id, version_id: v1.id, channel_id: 'C0123456', request_id: 'req-00000001', person_confirmed: false } });
 ok('Slack posting refused unless person_confirmed is literally true', falseConfirm.isError === true);
 
+// ---------- Make an approved revision in your own Claude (connector only) ----------
+{
+  const tool = async (client, name, args) => { const r = await client.callTool({ name, arguments: args }); return { err: r.isError ? parse(r) : null, data: r.isError ? null : parse(r) }; };
+  const upload = async (client, assetId, label) => {
+    const u = (await tool(client, 'request_upload_urls', { asset_id: assetId, files: [{ name: label, content_type: 'image/png' }] })).data.uploads[0];
+    await sdb.storage.from('ad-assets').upload(u.path, Buffer.alloc(2048, 7), { contentType: 'image/png' });
+    return u.path;
+  };
+  const save = async (client, assetId, extra = {}) => (await tool(client, 'save_version', { asset_id: assetId, file_path: await upload(client, assetId, 'v'), content_type: 'image/png', idempotency_key: 'k-' + Math.random().toString(36).slice(2, 12), ...extra }));
+  const q1 = async (sql, args = []) => (await db.query(sql, args)).rows;
+  const ad = (await tool(cT, 'create_ad', { concept_name: 'Spreadsheet joke', kind: 'static', format: 'feed45' })).data;
+  const p1 = (await save(cT, ad.id)).data;
+  const fb = async (body, approveIt = true) => { const c = (await tool(cH, 'add_feedback', { asset_id: ad.id, version_id: p1.id, body })).data; if (approveIt) await tool(cT, 'decide_feedback', { asset_id: ad.id, feedback_id: c.id, decision: 'approved' }); return c.id; };
+  const yes = await fb('Cut the word Very'), no = await fb('Make it purple', false);
+
+  ok('revision: a teammate cannot start one on someone else\'s ad', (await tool(cH, 'start_revision', { asset_id: ad.id })).err?.error === 'forbidden');
+  const b1 = (await tool(cT, 'start_revision', { asset_id: ad.id })).data;
+  ok('revision: owner gets only the approved, frozen items, the exact parent and rev', b1.approved_feedback.length === 1 && b1.approved_feedback[0].body === 'Cut the word Very' && b1.approved_feedback[0].author === 'Henry'
+    && b1.parent.version_id === p1.id && b1.parent_is_latest && typeof b1.rev === 'number' && b1.engine === 'claude' && /data from teammates/.test(b1.rules));
+  const adminTry = await tool(cS, 'start_revision', { asset_id: ad.id });
+  ok('revision: an admin cannot silently take an active claim', /conflict/.test(adminTry.err?.error || '') && /making this version/.test(adminTry.err?.message || '') && (await q1(`select claimed_by from processing where id=$1`, [b1.processing_id]))[0].claimed_by === TENG);
+  ok('revision: the claimer resumes the same run', (await tool(cT, 'start_revision', { asset_id: ad.id })).data.processing_id === b1.processing_id);
+  await db.query(`update comments set body = 'Delete the whole ad', edited_at = now() where id = $1`, [yes]);
+  ok('revision: a Slack edit after claiming does not change the approved text', (await tool(cT, 'get_revision', { processing_id: b1.processing_id })).data.approved_feedback[0].body === 'Cut the word Very');
+  const cur = (await tool(cT, 'get_revision', { processing_id: b1.processing_id })).data;
+  ok('revision: nobody else can complete or fail the claimer\'s run', /conflict/.test((await tool(cS, 'fail_revision', { processing_id: b1.processing_id, rev: cur.rev, message: 'x' })).err?.error || ''));
+  const nv = (await save(cT, ad.id, { parent_version_id: b1.parent.version_id, processing_id: b1.processing_id, revision_note: 'Cut "Very"' })).data;
+  const done = await tool(cT, 'complete_revision', { processing_id: b1.processing_id, rev: cur.rev, result_version_id: nv.id, note: 'Cut "Very"' });
+  const [cy] = await q1(`select status, applied_in from comments where id=$1`, [yes]), [cn] = await q1(`select status from comments where id=$1`, [no]);
+  ok('revision: completing applies exactly the approved item in the new version', !done.err && cy.status === 'applied' && cy.applied_in === nv.id && cn.status === 'open', JSON.stringify(done.err));
+
+  // The app button queued it for the worker; this Claude takes it before the worker starts. Atomic both ways.
+  const c2 = await fb('Smaller logo');
+  const wq = (await sdb.rpc('feedback_process', { p_asset: ad.id, p_note: null, p_actor: TENG })).data;
+  const b2 = (await tool(cT, 'start_revision', { asset_id: ad.id })).data;
+  const [job2] = await q1(`select state, message from revision_jobs where processing_id=$1`, [wq.id]);
+  ok('worker race: Claude adopts the queued run and the worker\'s job is cancelled in the same step', b2.processing_id === wq.id && b2.engine === 'claude' && job2.state === 'cancelled' && /Claude/.test(job2.message));
+  const workerClaim = `update public.revision_jobs set state = 'working', claimed_at = now(), updated_at = now(), session_url = null, attempts = attempts + 1
+    where id = (select j.id from public.revision_jobs j left join public.processing p on p.id = j.processing_id
+      where (j.state = 'queued' or (j.state = 'working' and j.claimed_at < now() - interval '45 minutes' and j.attempts < 3))
+        and ((j.processing_id is not null and p.status in ('approved','executing')) or (j.processing_id is null and app_private.can_manage_as(j.requested_by, j.asset_id)))
+      order by j.created_at limit 1 for update of j skip locked) returning *`;
+  ok('worker race: the scheduled worker then finds nothing to claim', (await q1(workerClaim)).filter(j => j.asset_id === ad.id).length === 0);
+  const g2 = (await tool(cT, 'get_revision', { processing_id: b2.processing_id })).data;
+  await tool(cT, 'fail_revision', { processing_id: b2.processing_id, rev: g2.rev, message: 'Testing the worker race' });
+  ok('fail: ends the run and leaves the feedback approved for the next try', (await q1(`select status, decision from comments where id=$1`, [c2]))[0].status === 'open' && (await q1(`select status from processing where id=$1`, [b2.processing_id]))[0].status === 'failed');
+
+  const wq2 = (await sdb.rpc('feedback_process', { p_asset: ad.id, p_note: null, p_actor: TENG })).data;
+  await q1(workerClaim);
+  const late = await tool(cT, 'start_revision', { asset_id: ad.id });
+  ok('worker race: once the worker has it, Claude is refused and the worker keeps it', /worker is already making/.test(late.err?.message || '') && (await q1(`select engine from processing where id=$1`, [wq2.id]))[0].engine === 'worker');
+  await db.query(`update processing set status='failed' where id=$1`, [wq2.id]); await db.query(`update revision_jobs set state='failed' where processing_id=$1`, [wq2.id]);
+
+  // Stale parent: a newer version appears while this Claude is working.
+  const b3 = (await tool(cT, 'start_revision', { asset_id: ad.id })).data;
+  await save(cT, ad.id, { parent_version_id: b3.parent.version_id });
+  const stale = await save(cT, ad.id, { parent_version_id: b3.parent.version_id, processing_id: b3.processing_id });
+  ok('stale parent: the save is refused, nothing overwritten', stale.err?.error === 'conflict' && /stale_parent/.test(stale.err.message));
+  const g3 = (await tool(cT, 'get_revision', { processing_id: b3.processing_id })).data;
+  ok('stale parent: the brief says the parent is no longer the latest', g3.parent_is_latest === false);
+  await tool(cT, 'fail_revision', { processing_id: b3.processing_id, rev: g3.rev, message: 'A newer version appeared' });
+  ok('stale parent: failing keeps the feedback approved and open', (await q1(`select status, decision from comments where id=$1`, [c2]))[0].status === 'open');
+
+  // Two people press at once: exactly one claim.
+  const both = await Promise.all([tool(cT, 'start_revision', { asset_id: ad.id }), tool(cS, 'start_revision', { asset_id: ad.id })]);
+  const runs = await q1(`select * from processing where asset_id=$1 and status='executing'`, [ad.id]);
+  ok('concurrency: two simultaneous starts make one run with one claimer; the other gets a conflict', runs.length === 1 && both.filter(x => x.data).length === 1 && both.filter(x => /conflict/.test(x.err?.error || '')).length === 1);
+  // A claim that went quiet can be taken over, but only explicitly.
+  await db.query(`update processing set claimed_at = now() - interval '3 hours' where id=$1`, [runs[0].id]);
+  const other = runs[0].claimed_by === TENG ? cS : cT, otherId = runs[0].claimed_by === TENG ? SHANE : TENG;
+  ok('stale claim: not taken without asking', /take it over explicitly/.test((await tool(other, 'start_revision', { asset_id: ad.id })).err?.message || ''));
+  const took = (await tool(other, 'start_revision', { asset_id: ad.id, take_over_stale: true })).data;
+  const [after] = await q1(`select claimed_by, history from processing where id=$1`, [runs[0].id]);
+  ok('stale claim: explicit take over is recorded', took.processing_id === runs[0].id && after.claimed_by === otherId && after.history.some(h => h.event === 'takeover'));
+  ok('revision tools never accept raw instructions: only approved items are returned', took.approved_feedback.every(x => x.body !== 'Make it purple'));
+}
+
 // ---------- Origin (DNS rebinding): exact allowlist, 403 for anything else, no CORS ----------
 ok('origin: app origin allowed by default; none extra', JSON.stringify(cfg.allowedOrigins) === JSON.stringify(['https://studio.example']));
 const cfg2 = auth.mcpConfig({ NEXT_PUBLIC_SUPABASE_URL: 'https://ref.supabase.co', APP_URL: 'https://studio.example', MCP_OAUTH_CLIENT_IDS: 'claude-connector', MCP_CONNECTOR_ENABLED: 'true',

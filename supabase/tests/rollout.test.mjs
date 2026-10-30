@@ -152,13 +152,13 @@ function threadFixture(comments, manage = true, inFlight = []) {
   const props = { comments, vs: [v1, v2], manage, inFlight: new Set(inFlight), nextVersion: 3, who: id => id || 'Claude', audioUrls: {}, toast: () => {}, reload: () => {} };
   return { Thread: () => React.createElement(Thread, props), calls };
 }
-function regenFixture(proc, comments) {
+function regenFixture(proc, comments, { engine = 'creative/clay/engine.js', me = 'shane' } = {}) {
   const calls = [];
   const Bar = source('src/components/Process.tsx', {
     '@/lib/supabase/browser': { sb: () => ({ rpc: async (fn, args) => { calls.push({ fn, args }); return { data: {}, error: null }; } }) },
     '@/lib/data': { fmtDate: () => '' },
   }).default;
-  const props = { a: asset, vs: [v1, v2], comments, proc, reload: () => {}, toast: () => {}, onOpen: () => {} };
+  const props = { a: asset, vs: [v1, { ...v2, source: engine ? { engine, tool: 'Claude' } : { tool: 'Claude Design' } }], comments, proc, reload: () => {}, toast: () => {}, onOpen: () => {}, me, who: id => ({ teng: 'Teng He', shane: 'Shane' })[id] || 'Someone' };
   return { Bar: () => React.createElement(Bar, props), calls };
 }
 const decideBtns = label => [...document.querySelectorAll('.decide button')].filter(b => b.textContent === label);
@@ -519,5 +519,29 @@ test('a Higgsfield regenerate in progress says so honestly, with no cancel and a
   assert.match(document.body.textContent, /Rendering v2 in Higgsfield/); assert.match(document.body.textContent, /frozen when you pressed Regenerate/);
   assert.match(document.body.textContent, /answer was unclear/);
   assert.ok(!button('Cancel') && !button('Regenerate in Higgsfield'));
+  await finish();
+});
+
+test('an ad the worker can’t rebuild offers Continue in Claude instead of promising a result within the hour', async () => {
+  const f = regenFixture(null, [cB], { engine: null }); await mount(f.Bar);
+  assert.ok(!button('Regenerate ad'), 'no worker button for a Claude Design ad');
+  assert.ok(button('Continue in Claude'));
+  const t = document.body.textContent;
+  assert.match(t, /made in Claude Design, which the hourly worker can’t rebuild/); assert.match(t, /only the approved items/);
+  assert.doesNotMatch(t, /within the hour/);
+  assert.equal(f.calls.length, 0, 'nothing queued');
+  await finish();
+});
+
+test('a run being made in someone’s Claude says who and since when; only they can cancel', async () => {
+  const proc = { id: 'p1', asset_id: 'asset', reviewed_version_id: 'asset_v2', comment_ids: ['c-b'], status: 'executing', engine: 'claude', claimed_by: 'teng', claimed_at: '2026-10-30T15:00:00Z', rev: 2 };
+  let f = regenFixture(proc, [cA, cB]); await mount(f.Bar);
+  assert.match(document.body.textContent, /Teng He is making v3 in Claude/); assert.ok(!button('Cancel'), 'an admin can’t cancel someone else’s claim from here');
+  assert.ok(!button('Regenerate ad') && !button('Continue in Claude'));
+  await finish();
+  f = regenFixture(proc, [cA, cB], { me: 'teng' }); await mount(f.Bar);
+  assert.match(document.body.textContent, /You’re making v3 in Claude/);
+  await act(async () => button('Cancel').click()); await flush();
+  assert.equal(f.calls[0].fn, 'processing_set_status'); assert.equal(f.calls[0].args.p_status, 'cancelled');
   await finish();
 });

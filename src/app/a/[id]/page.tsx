@@ -145,7 +145,7 @@ function AssetDetail({ id }: { id: string }) {
           {!comments.rows.length ? null : manage ? <p className="hint">Approve the changes you want in the next version, then regenerate. This is separate from approving the ad itself.</p>
             : <p className="hint">{ownerName} decides which feedback goes into the next version.</p>}
           <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }}>
-            {manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} /> : null}
+            {manage && (comments.rows.length || proc) ? <ProcessFeedback a={a} vs={vs} comments={comments.rows} proc={proc} reload={() => { procs.reload(); comments.reload(); versions.reload(); }} toast={toast} onOpen={selectVersion} me={member?.user_id} who={who} /> : null}
           </FeedbackThread>
           {canComment ? <form className="composer-box" aria-label="Add feedback" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
               if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }

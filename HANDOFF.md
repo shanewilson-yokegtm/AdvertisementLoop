@@ -16,7 +16,8 @@ Live app: https://advertisementloop-eight.vercel.app · Supabase project `uevktz
   (Higgsfield save recovery, Slack retries, feedback API context, self-contained skill packaging), one-card-per-asset
   Library fix, the account-based Claude connector (MCP + Supabase OAuth 2.1, built but OFF), Higgsfield
   Regenerate from approved feedback, and skill/plugin 0.4.0.
-- Two migrations wait for approval: `20261030090000_mcp_oauth_guard`, `20261030091000_higgsfield_revisions`.
+- Three migrations wait for approval: `20261030090000_mcp_oauth_guard`, `20261030091000_higgsfield_revisions`, `20261030092000_claude_revisions`.
+- Non-repo-engine ads (most of the library) are revised in a person's Claude via the connector (`start_revision` … `complete_revision`); the app says so instead of promising the hourly worker.
 - Connector setup steps for Shane are in README › *Claude connector setup*. Do not enable OAuth, register clients,
   set the hook or env vars without his approval. Never share an admin token in a connector header.
 - The personal-token CLI is now the advanced path (Claude Code). Claude chat needs the connector; until it's on,
