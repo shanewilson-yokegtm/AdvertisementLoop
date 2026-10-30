@@ -49,7 +49,7 @@ Two open items still wait on that ad: the 22:53 fuse/explode note on v3, and the
 7. `creative/REVISIONS.md` (worker playbook): address EVERY item in `comment_ids`, check each one against the render, the newest item wins on conflict, and the revision_note covers each item.
 8. `supabase/tests/rollout.test.mjs` updated for the new UI: 18 passing.
 
-**Interrupted mid-command:** the last command deleted `skills/yoke-ad-maker.zip` and was rebuilding it. Check that it exists; if not, re-zip the folder.
+**Saved on branch `feedback-approve-process`** (pushed, commit 7df30fe), NOT on `main`, so the live app isn't calling RPCs that don't exist yet. The skill zip was rebuilt. Merge to `main` only after the migration is applied.
 
 **Next steps:**
 1. Recreate the skill zip if it's missing. Then run `npx tsc --noEmit -p .`, `npm test`, `npm run test:e2e` and `npm run build`.
