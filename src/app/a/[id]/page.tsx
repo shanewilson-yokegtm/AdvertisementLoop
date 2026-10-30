@@ -13,7 +13,6 @@ import { useRecorder, saveVoiceComment, RecordControl } from '@/components/Voice
 import ProcessFeedback, { activeProcessing, type Processing } from '@/components/Process';
 import FeedbackThread, { PreviousRuns } from '@/components/FeedbackThread';
 import { useHiggsfieldPoll } from '@/components/Higgsfield';
-import { radioKeys, tab } from '@/lib/radio';
 
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
@@ -104,8 +103,8 @@ function AssetDetail({ id }: { id: string }) {
     <div className="asset">
       <div className="stage">
         <div className="stagebar">
-          {vs.length > 1 ? <div className="seg sm" role="radiogroup" aria-label="Version" onKeyDown={radioKeys}>{vs.map(x =>
-            <button key={x.id} type="button" role="radio" aria-checked={x.id === v.id} tabIndex={tab(x.id === v.id)} onClick={() => selectVersion(x.id)}>v{x.version}</button>)}</div> : <span className="muted small">v{v.version}</span>}
+          {/* Only the version in view; other versions are opened from Previous runs and versions. */}
+          <span className="muted small" id="viewing">Viewing v{v.version}{vs.length > 1 ? (isLatest ? ' · latest' : ` · older, latest is v${latest?.version}`) : ''}</span>
         </div>
         {!isLatest && latest ? <div className="banner" role="status"><span>You’re viewing v{v.version}. A newer version is available.</span>
           <span className="row"><button className="btn small" onClick={() => selectVersion(latest.id)}>View v{latest.version}</button>
@@ -161,7 +160,7 @@ function AssetDetail({ id }: { id: string }) {
           return <FeedbackThread comments={comments.rows} vs={vs} manage={manage} inFlight={inFlight} nextVersion={activeNext} latestVersion={latest?.version || 0} viewedVersionId={v.id} who={who} audioUrls={audioUrls} toast={toast}
             reload={() => { comments.reload(); procs.reload(); }} regen={active ? null : panel} progress={active ? panel : null} />; })()}
 
-        <PreviousRuns comments={comments.rows} runs={procs.rows as any} shares={shares.rows} onOpen={selectVersion} vs={vs} manage={manage} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }} />
+        <PreviousRuns viewedVersionId={v.id} comments={comments.rows} runs={procs.rows as any} shares={shares.rows} onOpen={selectVersion} vs={vs} manage={manage} who={who} audioUrls={audioUrls} toast={toast} reload={() => { comments.reload(); procs.reload(); }} />
 
         <div>
           {copyRows.length || v.copy?.cta ? <details className="disc"><summary>Copy</summary><div className="inner">

@@ -39,7 +39,7 @@ function useCard({ vs, manage, who, audioUrls, toast, reload }: Shared, opts: { 
     const yes = isOpen && c.decision === 'approved';
     const ver = vOf(c.version_id);
     const older = isOpen && ver != null && ver < opts.latestVersion;
-    const state = c.status === 'applied' ? <span className="chip ok">Applied in v{vOf(c.applied_in) ?? '?'}</span>
+    const state = c.status === 'applied' ? <span className="chip ok">{vOf(c.applied_in) != null ? `Applied in v${vOf(c.applied_in)}` : 'Applied'}</span>
       : flying ? <span className="chip live">Going into v{opts.nextVersion}</span>
       : c.status === 'dismissed' ? <span className="chip plain">Rejected</span>
       : yes ? <span className="chip ok">Approved, not processed</span>
@@ -105,15 +105,17 @@ type Run = { id: string; status: string; engine?: string; reviewed_version_id: s
 
 /** One closed drawer: every earlier version (what changed, feedback applied in it, the run that made it), rejected
  *  feedback, runs that ended without a version, and shares. Built only from recorded applied_in / runs. */
-export function PreviousRuns({ comments, runs, shares, onOpen, ...shared }: Shared & {
-  comments: Comment[]; runs: Run[]; shares: any[]; onOpen: (versionId: string) => void;
+export function PreviousRuns({ comments, runs, shares, onOpen, viewedVersionId, ...shared }: Shared & {
+  comments: Comment[]; runs: Run[]; shares: any[]; onOpen: (versionId: string) => void; viewedVersionId?: string;
 }) {
   const card = useCard(shared, { latestVersion: 0 });
   const { vs, who } = shared;
   const applied = comments.filter(c => c.status === 'applied'), rejected = comments.filter(c => c.status === 'dismissed').reverse();
   const ended = runs.filter(r => ['failed', 'cancelled'].includes(r.status)).reverse();
   const versions = [...vs].reverse();
-  const count = versions.length + rejected.length + ended.length;
+  // Applied items whose applied_in is missing or not a loaded version are still history: never drop them.
+  const unmatched = applied.filter(c => !vs.some(x => x.id === c.applied_in));
+  const count = versions.length + rejected.length + ended.length + unmatched.length;
   return <details className="disc" id="history">
     <summary>Previous runs and versions<span className="muted">{vs.length} version{vs.length === 1 ? '' : 's'}{rejected.length ? ` · ${rejected.length} rejected` : ''}</span></summary>
     <div className="inner">
@@ -122,13 +124,15 @@ export function PreviousRuns({ comments, runs, shares, onOpen, ...shared }: Shar
         const here = applied.filter(c => c.applied_in === x.id);
         const made = runs.filter(r => r.result_version_id === x.id);
         return <div key={x.id} className="hist">
-          <div className="row"><button type="button" className="btn small" onClick={() => onOpen(x.id)}>v{x.version}</button>
+          <div className="row"><button type="button" className="btn small" aria-current={x.id === viewedVersionId ? 'true' : undefined} onClick={() => onOpen(x.id)}>v{x.version}</button>
+            {x.id === viewedVersionId ? <span className="chip plain">Viewing</span> : null}
             <span className="muted small">{fmtDate(x.created_at)} · {who(x.created_by, x.legacy_creator)}{x.parent_version_id ? ` · from v${vs.find(p => p.id === x.parent_version_id)?.version ?? '?'}` : ''}</span></div>
           {x.revision_note ? <Clamp text={x.revision_note} limit={160} /> : null}
           {made.map(r => <div key={r.id} className="muted small">Made from {r.comment_ids.length} approved item{r.comment_ids.length === 1 ? '' : 's'}{r.engine && r.engine !== 'worker' ? ` (${r.engine === 'claude' ? 'in Claude' : 'Higgsfield'})` : ''} · {fmtDate(r.updated_at)}{r.instructions ? ` · note: ${r.instructions}` : ''}</div>)}
           {here.length ? <ul className="thread" role="list" style={list} aria-label={`Feedback applied in v${x.version}`}>{here.map(card)}</ul> : null}
         </div>;
       })}
+      {unmatched.length ? <div className="hist"><h3>Applied, version not recorded · {unmatched.length}</h3><ul className="thread" role="list" style={list}>{unmatched.map(card)}</ul></div> : null}
       {rejected.length ? <div className="hist"><h3>Rejected feedback · {rejected.length}</h3><ul className="thread" role="list" style={list}>{rejected.map(card)}</ul></div> : null}
       {ended.length ? <div className="hist"><h3>Runs that ended without a new version · {ended.length}</h3>
         {ended.map(r => <div key={r.id} className="muted small">{r.status === 'failed' ? 'Failed' : 'Cancelled'} · {fmtDate(r.updated_at)} · on v{vs.find(v => v.id === r.reviewed_version_id)?.version ?? '?'} · {r.comment_ids.length} item{r.comment_ids.length === 1 ? '' : 's'}{r.message ? ` · ${r.message}` : ''}</div>)}</div> : null}

@@ -68,7 +68,12 @@ test('realtime upload does not move the media or approval target; explicit selec
   assert.match(document.body.textContent, /newer version is available/);
   await act(async () => button('Approve v1').click());
   assert.equal(f.writes[0].version_id, v1.id);
-  await act(async () => button('v2').click());
+  assert.equal(document.querySelectorAll('[role="radio"]').length, 0, 'no always-visible version strip');
+  assert.match(document.getElementById('viewing').textContent, /Viewing v1 · older, latest is v2/);
+  const hist = document.getElementById('history'); assert.equal(hist.open, false);
+  assert.equal(hist.querySelector('[aria-current="true"]').textContent, 'v1');
+  await act(async () => { hist.open = true; });
+  await act(async () => [...hist.querySelectorAll('button')].find(b => b.textContent === 'v2').click());
   assert.equal(document.getElementById('selected-media').textContent, v2.id);
   await finish();
 });
@@ -208,7 +213,8 @@ test('feedback groups: needs decision, approved-not-processed, in progress, then
   const going = { ...cA, id: 'c-go', body: 'Going now', decision: 'approved' };
   const runs = [{ id: 'r1', status: 'done', reviewed_version_id: 'asset_v1', result_version_id: 'asset_v2', comment_ids: ['c-ap'], instructions: null, message: null, processor: null, started_by: null, updated_at: '', created_at: '' },
     { id: 'r2', status: 'failed', reviewed_version_id: 'asset_v2', result_version_id: null, comment_ids: ['c-b'], instructions: null, message: 'render broke', processor: null, started_by: null, updated_at: '', created_at: '' }];
-  const f = threadFixture([cA, cB, cC, applied, going], true, ['c-go'], runs); await mount(f.Thread);
+  const orphan = { ...cA, id: 'c-orph', body: 'Applied somewhere unknown', status: 'applied', applied_in: null };
+  const f = threadFixture([cA, cB, cC, applied, going, orphan], true, ['c-go'], runs); await mount(f.Thread);
   const h3 = [...document.querySelectorAll('#fpH ~ .group h3, .group h3')].map(e => e.textContent);
   assert.deepEqual(h3, ['Needs decision · 1', 'Approved, not processed yet · 1']);
   const pend = document.querySelector('[aria-labelledby="fpH"]'), prog = document.querySelector('[aria-labelledby="ipH"]'), hist = document.getElementById('history');
@@ -216,7 +222,10 @@ test('feedback groups: needs decision, approved-not-processed, in progress, then
   assert.ok(prog.textContent.includes('Going now') && !pend.textContent.includes('Going now'), 'in-flight items sit under In progress');
   for (const done of ['Old applied note', 'Louder']) { assert.ok(!pend.textContent.includes(done)); assert.ok(hist.textContent.includes(done)); }
   assert.equal(hist.tagName, 'DETAILS'); assert.equal(hist.open, false, 'history is closed by default');
-  assert.match(hist.textContent, /Made from 1 approved item/); assert.match(hist.textContent, /Failed .* render broke/);
+  assert.match(hist.textContent, /Made from 1 approved item/);
+  const orph = [...hist.querySelectorAll('.hist')].find(d => /Applied, version not recorded · 1/.test(d.textContent));
+  assert.ok(orph && /Applied somewhere unknown/.test(orph.textContent), 'applied items with no matching version stay in history');
+  assert.ok(!pend.textContent.includes('Applied somewhere unknown')); assert.match(hist.textContent, /Failed .* render broke/);
   assert.ok(pend.compareDocumentPosition(hist) & 4, 'history comes after the pending feedback');
   await finish();
 });
