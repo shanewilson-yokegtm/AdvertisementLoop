@@ -10,6 +10,10 @@ yas_... token from Ad Studio > Connect Claude) from the environment. Never print
   adstudio.py get ASSET_ID                       # asset, versions (signed media/source URLs), comments, your review if you own it
   adstudio.py create --name N --kind static|motion|video --format feed45|square|vertical|landscape
   adstudio.py save ASSET_ID --file F [--poster P] [--source S] [--parent VERSION_ID] [--note TEXT] [--meta JSON] [--key KEY] [--review REVIEW_ID]
+  adstudio.py hf-usage                           # Higgsfield seconds used this month, cap, allowed lengths
+  adstudio.py higgsfield --prompt P [--seconds 4-12] [--format vertical|feed45|square|landscape] [--no-sound]
+                         [--asset ASSET_ID | --name N] [--key KEY] [--wait SECONDS]   # ONE billable Seedance 2.5 render
+  adstudio.py hf-status JOB_ID                   # check a render once (finishes the version when ready)
   adstudio.py save-pending ASSET_ID --note "Higgsfield render pending: ..." [--meta JSON] [--key KEY]
   adstudio.py comment ASSET_ID --version VERSION_ID --text T [--at SECONDS]
   adstudio.py process ASSET_ID                   # start or resume the shared review (no edits)
@@ -25,7 +29,7 @@ yas_... token from Ad Studio > Connect Claude) from the environment. Never print
 Exit code 0 on success; on failure prints {"error":..., "message":...} and exits 1. Nothing is reported as saved unless
 the API returned it.
 """
-import argparse, hashlib, json, mimetypes, os, socket, struct, sys, urllib.error, urllib.request, uuid, zipfile
+import argparse, time, hashlib, json, mimetypes, os, socket, struct, sys, urllib.error, urllib.request, uuid, zipfile
 
 TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
          '.webm': 'video/webm', '.svg': 'image/svg+xml', '.html': 'text/html', '.json': 'application/json', '.zip': 'application/zip', '.txt': 'text/plain'}
@@ -113,6 +117,11 @@ def main():
     x = sp.add_parser('create'); x.add_argument('--name', required=True); x.add_argument('--kind', required=True); x.add_argument('--format', required=True)
     x = sp.add_parser('save'); x.add_argument('asset'); x.add_argument('--file', required=True); x.add_argument('--poster'); x.add_argument('--source')
     x.add_argument('--parent'); x.add_argument('--note'); x.add_argument('--meta', default='{}'); x.add_argument('--key'); x.add_argument('--review')
+    sp.add_parser('hf-usage')
+    x = sp.add_parser('higgsfield'); x.add_argument('--prompt', required=True); x.add_argument('--seconds', type=int, default=9)
+    x.add_argument('--format', default='vertical', choices=['vertical', 'feed45', 'square', 'landscape']); x.add_argument('--no-sound', action='store_true')
+    x.add_argument('--asset'); x.add_argument('--name'); x.add_argument('--key'); x.add_argument('--wait', type=int, default=600)
+    x = sp.add_parser('hf-status'); x.add_argument('job')
     x = sp.add_parser('save-pending'); x.add_argument('asset'); x.add_argument('--note', required=True); x.add_argument('--meta', default='{}'); x.add_argument('--key')
     x = sp.add_parser('comment'); x.add_argument('asset'); x.add_argument('--version', required=True); x.add_argument('--text', required=True); x.add_argument('--at', type=float)
     x = sp.add_parser('decide'); x.add_argument('asset'); x.add_argument('feedback'); x.add_argument('decision', choices=['approved', 'rejected', 'undecided']); x.add_argument('--reason')
@@ -149,6 +158,19 @@ def main():
     elif a.cmd == 'save-pending':
         r = api('POST', f'assets/{a.asset}/versions', {**json.loads(a.meta), 'render_state': 'pending', 'render_note': a.note, 'idempotency_key': a.key or f'pending-{uuid.uuid4()}'})
     elif a.cmd == 'comment': r = api('POST', f'assets/{a.asset}/comments', {'version_id': a.version, 'body': a.text, 'at_sec': a.at})
+    elif a.cmd == 'hf-usage': r = api('GET', 'higgsfield/usage')
+    elif a.cmd == 'hf-status': r = api('GET', f'higgsfield/status?job={a.job}')
+    elif a.cmd == 'higgsfield':
+        # Never retried: the idempotency key makes a repeat return the first render instead of paying twice.
+        key = a.key or 'hf-' + hashlib.sha256(f'{a.asset or a.name}|{a.prompt}|{a.seconds}|{a.format}|{not a.no_sound}'.encode()).hexdigest()[:32]
+        r = api('POST', 'higgsfield/generate', {'prompt': a.prompt, 'duration': a.seconds, 'format': a.format, 'audio': not a.no_sound,
+                                                'asset_id': a.asset, 'concept_name': a.name, 'idempotency_key': key})
+        deadline = time.time() + max(0, a.wait)
+        while r.get('status') in ('submitting', 'submitted') and time.time() < deadline:
+            time.sleep(15)
+            s2 = api('GET', f"higgsfield/status?job={r['job_id']}")
+            r = {**r, **s2}
+        if r.get('status') in ('submitting', 'submitted'): r['message'] = f"Still rendering. Check later: adstudio.py hf-status {r['job_id']}"
     elif a.cmd == 'decide': r = api('POST', f'assets/{a.asset}/feedback/{a.feedback}/decide', {'decision': a.decision, 'reason': a.reason})
     elif a.cmd == 'process-approved': r = api('POST', f'assets/{a.asset}/process-approved', {'note': a.note})
     elif a.cmd == 'process': r = api('POST', f'assets/{a.asset}/processing', {})

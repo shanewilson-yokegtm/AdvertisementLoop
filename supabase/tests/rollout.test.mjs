@@ -98,6 +98,14 @@ test('one feedback box: needs text, then saves feedback on the version being vie
   await finish();
 });
 
+test('the action row is only Share, Download, Approve', async () => {
+  const f = reviewFixture(); await mount(f.Page);
+  const row = button('Share').parentElement;
+  assert.deepEqual([...row.querySelectorAll('button')].map(b => b.textContent), ['Share', 'Download', 'Approve v1']);
+  for (const label of ['Iterate with Claude', 'Upload new version', 'Suggest a change', 'Share for review']) assert.equal(button(label), undefined, label + ' gone');
+  await finish();
+});
+
 test('reject removes the ad from the Library', async () => {
   const f = reviewFixture(); await mount(f.Page);
   await act(async () => button('Reject ad').click());
@@ -109,8 +117,8 @@ test('reject removes the ad from the Library', async () => {
 test('a member who does not own the ad can comment but cannot revise, reject or process it', async () => {
   member = { user_id: 'teng', role: 'creator' };
   const f = reviewFixture([v1, v2], 'v=asset_v1'); await mount(f.Page);
-  assert.ok(button('Suggest a change'), 'offers a suggestion route');
-  for (const label of ['Upload new version', 'Iterate with Claude', 'Reject ad', 'Revert to v1']) assert.equal(button(label), undefined, label + ' hidden');
+  for (const label of ['Share', 'Download']) assert.ok(button(label), label + ' shown');
+  for (const label of ['Reject ad', 'Revert to v1']) assert.equal(button(label), undefined, label + ' hidden');
   assert.equal(document.getElementById('process-panel'), null);
   assert.ok(document.getElementById('cmt'), 'comment box available');
   await finish(); member = { user_id: 'shane', role: 'admin' };

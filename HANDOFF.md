@@ -10,7 +10,13 @@ Live app: https://advertisementloop-eight.vercel.app · Supabase project `uevktz
 - Supabase `apply_migration` shows Shane an approval card. Tell him with SendUserMessage before calling it. After applying, rename the local migration file to the version Supabase recorded (`list_migrations`).
 - Don't claim success without verification. Report what remains unverified.
 
-## In progress: "only feedback" redesign (NOT deployed yet)
+## Shipped Oct 29 evening
+- "Only feedback" redesign: migration applied (20261030033828), merged and deployed (fa10d62).
+- Asset page action row is only Share / Download / Approve vN (Shane). Reject ad and Editable source moved into "Copy, checks and file". Iterate, Upload and Suggest buttons removed.
+- Higgsfield for skills: `/api/v1/higgsfield/{generate,status,usage}` (personal token, same code and idempotency as the button). `adstudio.py higgsfield|hf-status|hf-usage`. `yoke-ad-maker` confirms length and seconds-used before each render. The Higgsfield MCP connector can't generate, so skills must never use it for renders.
+- `skills/ad-builder/SKILL.md` rewritten (+ zip). It is an ORG plugin: Shane must republish it; the installed copy still says "Higgsfield isn't connected".
+
+## Earlier: "only feedback" redesign (now deployed; history below)
 
 Shane's request (8:28pm): "there is only feedback, no comments AND feedback. I go through, I approve or reject the feedback, then when I hit process the task is to process all of the approved feedback in the next pass."
 

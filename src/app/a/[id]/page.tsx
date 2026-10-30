@@ -115,18 +115,13 @@ function AssetDetail({ id }: { id: string }) {
           {rev ? <span className="muted">{rev.status === 'approved' ? 'Approved' : 'Changes requested'} by {who(rev.reviewer)} · {fmtDate(rev.at)}</span> : null}</div>
         {v.render?.note ? <div className="muted">{v.render.note}</div> : null}
         {v.revision_note ? <div><b>What changed: </b>{v.revision_note}</div> : null}
+        {/* Three actions only (Shane, Oct 29): Share, Download, Approve. */}
         <div className="row">
-          <button className="btn primary" onClick={() => setShare(true)}>Share for review</button>
-          {manage ? <button className="btn" onClick={iterate}>Iterate with Claude</button> : null}
-          {manage ? <button className="btn" onClick={() => setUp(true)}>Upload new version</button> : null}
-          {!manage && can(member, 'creator') ? <button className="btn" onClick={suggest}>Suggest a change</button> : null}
+          <button className="btn primary" onClick={() => setShare(true)}>Share</button>
           {v.file_path ? <button className="btn" onClick={download}>Download</button> : null}
-          {src.link ? <a className="btn" href={src.link} target="_blank" rel="noopener">Editable source</a> : null}
-        </div>
-        {can(member, 'approver') || manage ? <div className="row">
           {can(member, 'approver') ? <button className="btn" disabled={busy || !!blockedApproval || rev?.status === 'approved'} title={blockedApproval || ''} onClick={() => review('approved')}>{rev?.status === 'approved' ? `v${v.version} approved` : `Approve v${v.version}`}</button> : null}
-          {!a.archived && manage ? <button className="btn quiet-danger" disabled={busy} onClick={reject}>Reject ad</button> : null}
-          {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}</div> : job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
+        </div>
+        {job ? <JobStatus job={job} vs={vs} onOpen={selectVersion} /> : null}
         {can(member, 'creator') || can(member, 'approver') ? <form className="panel" aria-label="Feedback" onSubmit={async e => { e.preventDefault(); const t = cmt.trim(); if (!t && !cmtRec.take) return;
             if (cmtRec.state === 'rec') { toast('Stop the recording first'); return; }
             try {
@@ -167,7 +162,11 @@ function AssetDetail({ id }: { id: string }) {
               <dt>Made with</dt><dd>{src.tool || '--'}{src.model ? ' · ' + src.model : ''}</dd><dt>Notes</dt><dd>{src.prompt || '--'}</dd>
               <dt>File</dt><dd>{v.width}×{v.height}{v.duration_sec ? ' · ' + fmtSec(v.duration_sec) : ''} · {fmtBytes(v.size_bytes)} · {v.content_type || '--'}</dd>
               <dt>SHA-256</dt><dd className="mono">{(v.sha256 || '').slice(0, 16)}…</dd><dt>ID</dt><dd className="mono">{v.id}</dd></dl>
-            {manage ? <div><button className="btn small" onClick={async () => { const { error } = await sb().from('assets').update({ archived: !a.archived }).eq('id', a.id); toast(error ? error.message : a.archived ? 'Restored' : 'Archived'); }}>{a.archived ? 'Restore from archive' : 'Archive'}</button></div> : null}
+            {src.link || manage ? <div className="row">
+              {src.link ? <a className="btn small" href={src.link} target="_blank" rel="noopener">Editable source</a> : null}
+              {manage && !a.archived ? <button className="btn small quiet-danger" disabled={busy} onClick={reject}>Reject ad</button> : null}
+              {manage && a.archived ? <button className="btn small" onClick={async () => { const { error } = await sb().from('assets').update({ archived: false }).eq('id', a.id); toast(error ? error.message : 'Restored'); }}>Restore from archive</button> : null}
+            </div> : null}
           </div></details>
       </div>
     </div>

@@ -62,6 +62,25 @@ export async function handle(db: SupabaseClient, a: Actor, method: string, parts
 
   if (method === 'GET' && r0 === 'me') return { user_id: a.user_id, email: a.email, display_name: a.display_name, role: a.role };
 
+  // Higgsfield (Seedance 2.5) for Claude via a personal token: same code, limits and idempotency as the in-app button.
+  if (r0 === 'higgsfield') {
+    const creds = process.env.HF_CREDENTIALS;
+    if (!creds) throw new ApiError(503, 'higgsfield_not_connected', 'Higgsfield is not switched on (HF_CREDENTIALS missing on the server).');
+    const hf = await import('./higgsfield');
+    if (method === 'GET' && r1 === 'usage') return { ...(await hf.usage(db)), default_seconds: hf.DEFAULT_SECONDS, min_seconds: hf.MIN_SECONDS, max_seconds: hf.MAX_SECONDS };
+    if (method === 'POST' && r1 === 'generate') {
+      const r = await hf.generate(db, a, { ...(body || {}), chat_id: null }, creds, appUrl);
+      return { asset_id: r.asset_id, version_id: r.version_id, job_id: r.job.id, status: r.job.status, repeated: r.repeated, link: link(r.asset_id, r.version_id) };
+    }
+    if (method === 'GET' && r1 === 'status') {
+      const job = query.get('job') || '';
+      if (!/^[0-9a-f-]{36}$/.test(job)) throw new ApiError(400, 'invalid', 'job must be a job id');
+      const j = await hf.refresh(db, job, creds) as any;
+      return { status: j.status, error: j.error ?? null, asset_id: j.asset_id, version_id: j.version_id, link: link(j.asset_id, j.version_id) };
+    }
+    throw new ApiError(404, 'not_found', 'Unknown Higgsfield action');
+  }
+
   if (method === 'GET' && r0 === 'slack' && r1 === 'channels') {
     const token = process.env.SLACK_BOT_TOKEN;
     if (!token) throw new ApiError(503, 'slack_not_connected', 'Slack sharing is not switched on yet.');

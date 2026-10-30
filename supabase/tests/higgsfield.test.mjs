@@ -14,7 +14,7 @@ function load(file) {
   if (cache[file]) return cache[file];
   const code = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const m = { exports: {} }; cache[file] = m.exports;
-  new Function('require', 'module', 'exports', code)(id => id === './api' ? load('src/lib/server/api.ts') : id === './slack' ? load('src/lib/server/slack.ts') : require(id), m, m.exports);
+  new Function('require', 'module', 'exports', code)(id => id === './api' ? load('src/lib/server/api.ts') : id === './higgsfield' ? load('src/lib/server/higgsfield.ts') : id === './slack' ? load('src/lib/server/slack.ts') : require(id), m, m.exports);
   return Object.assign(cache[file], m.exports);
 }
 const { generate, refresh, usage, mp4Info } = load('src/lib/server/higgsfield.ts');
@@ -124,6 +124,29 @@ ok('usage counts seconds requested this month (errors excluded)', u.seconds_this
 process.env.HIGGSFIELD_MONTHLY_SECONDS = '35';
 ok('optional monthly cap blocks before paying', (await rejects(generate(sdb, actor(SHANE), { prompt: 'x', idempotency_key: 'key-00000010' }, 'c', APP, hf)))?.status === 402 && posts.length === before);
 delete process.env.HIGGSFIELD_MONTHLY_SECONDS;
+
+// ---------- Claude's token API (/api/v1/higgsfield/*): same generate, same limits ----------
+{
+  const { handle } = load('src/lib/server/api.ts');
+  const realFetch = globalThis.fetch; globalThis.fetch = hf; process.env.HF_CREDENTIALS = 'id:secret'; state = 'queued'; postStatus = 200;
+  const q = (s = '') => new URLSearchParams(s);
+  try {
+    const before = posts.length;
+    const g = await handle(sdb, actor(TENG), 'POST', ['higgsfield', 'generate'], { prompt: 'A rep ignores a pile of sticky notes', duration: 6, format: 'square', audio: false, concept_name: 'Sticky notes', idempotency_key: 'hf-api-00000001' }, q(), APP);
+    const last = posts[posts.length - 1];
+    ok('API: one submit, settings passed through', posts.length === before + 1 && last.body.duration === 6 && last.body.aspect_ratio === '1:1' && last.body.generate_audio === false && !!g.job_id && g.link.startsWith(`${APP}/a/${g.asset_id}?v=`));
+    const g2 = await handle(sdb, actor(TENG), 'POST', ['higgsfield', 'generate'], { prompt: 'A rep ignores a pile of sticky notes', duration: 6, format: 'square', audio: false, concept_name: 'Sticky notes', idempotency_key: 'hf-api-00000001' }, q(), APP);
+    ok('API: same key never submits twice', posts.length === before + 1 && g2.repeated && g2.job_id === g.job_id);
+    ok('API: viewers cannot generate', (await rejects(handle(sdb, actor(VIEW), 'POST', ['higgsfield', 'generate'], { prompt: 'x', idempotency_key: 'hf-api-00000002' }, q(), APP)))?.status === 403 && posts.length === before + 1);
+    const u = await handle(sdb, actor(VIEW), 'GET', ['higgsfield', 'usage'], null, q(), APP);
+    ok('API: usage shows seconds and allowed lengths', typeof u.seconds_this_month === 'number' && u.default_seconds === 9 && u.max_seconds === 12);
+    const s = await handle(sdb, actor(TENG), 'GET', ['higgsfield', 'status'], null, q('job=' + g.job_id), APP);
+    ok('API: status returns the job and its link', s.status === 'submitted' && s.version_id === g.version_id && s.link.includes(g.asset_id));
+    ok('API: bad job id refused', (await rejects(handle(sdb, actor(TENG), 'GET', ['higgsfield', 'status'], null, q('job=nope'), APP)))?.status === 400);
+    delete process.env.HF_CREDENTIALS;
+    ok('API: no server key -> higgsfield_not_connected, nothing sent', (await rejects(handle(sdb, actor(TENG), 'POST', ['higgsfield', 'generate'], { prompt: 'x', idempotency_key: 'hf-api-00000003' }, q(), APP)))?.code === 'higgsfield_not_connected' && posts.length === before + 1);
+  } finally { globalThis.fetch = realFetch; delete process.env.HF_CREDENTIALS; }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

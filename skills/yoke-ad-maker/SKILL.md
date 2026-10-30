@@ -43,7 +43,21 @@ Make real files with the tools available here. Check them before saving: readabl
 - **Motion / video:** the real rendered file plus a poster JPG, plus the source (timeline code, HTML, project zip) and any provider job ids in `--meta`.
 - **Not finished:** a storyboard, HTML preview, provider job or temporary URL is not a finished video. Save it with `save-pending` and a note saying what's missing.
 - **File types:** the script detects the real type. A WebM stays WebM.
-- **Higgsfield:** only with a connected tool and approved credits. Otherwise save a pending version with a production brief.
+- **Higgsfield video:** made through Ad Studio, not the Higgsfield connector (that connector can't generate). See below.
+
+## Higgsfield video (Seedance 2.5)
+
+Each render is billable. Ad Studio holds the Higgsfield key; you never see or need it.
+
+1. Write the prompt: one scene, the habit and the joke shown visually, no on-screen text or logo (Seedance can't spell; add the Yoke end card later as a separate version if needed). Pick the length (4-12 s, default 9), format (default `vertical`) and sound (default on).
+2. Run `python3 scripts/adstudio.py hf-usage`, then **confirm before rendering**. Ask in one line, e.g. `Render 9 s vertical with sound? This month: 54 s used of 300.` Render only after a yes. A yes covers that one render.
+3. `python3 scripts/adstudio.py higgsfield --prompt "<prompt>" --seconds 9 --format vertical --name "<concept>"` (or `--asset <id>` to add a version to an existing ad). It submits once, then waits up to 10 min for the render.
+   - **Never re-run to "retry".** Same arguments return the same render instead of paying twice. A new attempt with a changed prompt is a new render: confirm again.
+   - `completed`: the video is saved as a version. Report its `link`.
+   - `failed`, `nsfw` or `error`: report the reason. Offer a reworded prompt, and confirm before rendering it.
+   - Still rendering after the wait: give the `link` and `hf-status <job_id>`; the server finishes the version when it's ready.
+4. `higgsfield_not_connected`: the server key is missing. Tell Shane. Don't fall back to the connector or another provider.
+5. No Ad Studio token: save nothing, give the prompt as a brief, and point the person to the app's Create → Higgsfield video.
 
 ## Save
 

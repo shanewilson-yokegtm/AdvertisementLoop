@@ -42,4 +42,4 @@ Static: about 12 words maximum in the hook, one concise payoff naming a real cap
 
 Infographic motion: roughly 10–16 seconds, 3–5 short readable beats and an end card. Check timing and playback; preserve source and poster.
 
-Higgsfield or hybrid video: use the available connector only when connected and authorized. Keep overlay text and branding editable; preserve the original clips, prompts, job IDs, edit instructions, and final video. If unavailable, provide a pending production brief rather than claiming a render.
+Higgsfield or hybrid video: render through Ad Studio (`adstudio.py higgsfield`, after the person confirms length and seconds), never the Higgsfield connector, which can't generate. Keep overlay text and branding editable; preserve the original clips, prompts, job IDs, edit instructions, and final video. Without an Ad Studio token, provide a pending production brief rather than claiming a render.
