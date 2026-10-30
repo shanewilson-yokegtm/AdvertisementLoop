@@ -556,7 +556,9 @@ SPOTS.output = {
     ctx.fillText('Go-to-market', L.W / 2, y1); ctx.fillText('engineering', L.W / 2, y2);
     ctx.restore();
   },
-  draw(ctx, L, R, t) {
+  // v5 (job a67087d0, review 24b70244) applies to the 9:16 asset only; the 4:5 asset keeps the v4 kneading gag.
+  draw(ctx, L, R, t) { if (L.H > 1500) return outputBurst(ctx, L, R, t); return this.drawKnead(ctx, L, R, t); },
+  drawKnead(ctx, L, R, t) {
     const k = R.k, cx = L.W / 2, tall = L.H > 1500;
     const fl = L.H - L.ground;
     // 1) play button on the floor; cursor glides in, clicks at 1.4s, button squishes and shrinks away
@@ -658,6 +660,110 @@ function clayHand(ctx, L, x, y, k) {
   [[-120, -60, -150, -10], [-80, -55, -95, -2], [-35, -55, -40, 0], [10, -60, 15, -8]].forEach(([a, b, c, d], i) =>
     tube([[a + 20, b - 40], [a, b], [c, d]], 52 - i * 2, skin, 80 + i)); // fingers, tips on the clay
   tube([[95, -150], [125, -95], [120, -45]], 56, skin, 90); // thumb
+}
+
+// v5 (job a67087d0, review 24b70244), 9:16 only: no hand. Cursor hits play, pressure surges through the clay tubes
+// (bulges run along each band, the rainbow trembles), then the tubes burst like a pipe: clay sprays all over the screen,
+// the rainbow collapses onto the floor, and "Done" pops over the mess. Same 8.5s cut, 11.5s total.
+const OUT5 = { click: 1.4, surge: 1.8, burst: 4.7, done: 6.3 };
+function clayBlob(ctx, x, y, r, color, seed, squash = 1, rot = 0) {
+  if (r <= 0.5) return;
+  const Rn = rng(seed), n = 5, ph = Rn() * 6.28, amp = 0.07 + Rn() * 0.07;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(1 / Math.sqrt(squash), squash);
+  ctx.save(); ctx.filter = `blur(${r * 0.25}px)`; ctx.fillStyle = 'rgba(60,35,15,0.22)'; ctx.beginPath(); ctx.ellipse(r * 0.18, r * 0.24, r, r * 0.9, 0, 0, 7); ctx.fill(); ctx.restore();
+  ctx.beginPath();
+  for (let j = 0; j <= 48; j++) { const a = j / 48 * Math.PI * 2; const rr = r * (1 + amp * Math.sin(a * 3 + ph) + amp * 0.45 * Math.sin(a * n + ph * 2) + amp * 0.5 * Math.sin(a * 2 + ph * 3));
+    j ? ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+  ctx.closePath();
+  const g = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.05, 0, 0, r * 1.25);
+  g.addColorStop(0, shade(color, 0.42)); g.addColorStop(0.45, color); g.addColorStop(1, shade(color, -0.3));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.42, r * 0.16, r * 0.09, -0.6, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function outputBurst(ctx, L, R, t) {
+  const k = R.k, cx = L.W / 2, fl = L.H - L.ground, T = OUT5;
+  const bx = cx, by = L.ground + fl * 0.3, br = 140 * k;
+  const press = clamp((t - T.click) / 0.12) * (1 - clamp((t - T.click - 0.15) / 0.12));
+  const gone = smooth((t - T.click - 0.2) / 0.35);
+  // pressure: 0 at surge start -> 1 just before the burst
+  const P = clamp((t - T.surge) / (T.burst - T.surge));
+  const db = t - T.burst; // time since burst
+  const shake = db < 0 ? Math.pow(P, 3) * 9 * k : 0;
+  const sx = Math.sin(t * 71) * shake, sy = Math.cos(t * 53) * shake * 0.6;
+  // rupture points per band (s along the arc)
+  const RUP = [[0.36, 0.71], [0.28, 0.62], [0.47, 0.83], [0.22, 0.55], [0.4, 0.76]];
+  const fall = db > 0 ? clamp(db / 0.9) : 0, fallE = fall * fall * (3 - 2 * fall);
+  const bandPts = R.bands.map((b, i) => b.pts.map(p => {
+    let x = p.x, y = p.y, w = b.w;
+    if (db < 0 && t > T.surge) { // bulges travelling through the tube, faster and bigger as pressure builds
+      let bulge = 0; const speed = 0.35 + P * 1.4;
+      for (let q = 0; q < 2; q++) { const pos = ((t - T.surge) * speed + q * 0.5 + i * 0.13) % 1.2 - 0.1; bulge += Math.exp(-Math.pow((p.s - pos) / 0.07, 2)); }
+      w *= 1 + (0.18 + 0.55 * P) * bulge + 0.12 * P * P;
+      const n = Math.hypot(x, y) || 1; x += x / n * w * 0.08 * bulge; y += y / n * w * 0.08 * bulge;
+    }
+    if (db > 0) { // collapse: arc flattens and slumps onto the floor, spreading outward
+      const spread = 1 - 0.12 * fallE, lump = 0.5 + 0.5 * Math.sin(p.s * 9 + i * 1.9), yFloor = -w * 0.4 - i * w * 0.32 * lump - (1 - Math.abs(p.s - 0.5) * 2) * 40 * k;
+      x = x * spread + Math.sin(p.s * 20 + i) * 14 * k * fallE; y = lerp(y, yFloor, fallE); w *= 1 + 0.25 * fallE;
+    }
+    return { x: cx + x + sx, y: L.ground + Math.min(y, b.w * 0.6) + sy, w, s: p.s };
+  }));
+  let minX = 1e9, maxX = -1e9; bandPts.forEach(ps => ps.forEach(p => { minX = Math.min(minX, p.x - p.w / 2); maxX = Math.max(maxX, p.x + p.w / 2); }));
+  contactShadow(ctx, (minX + maxX) / 2, L.ground, (maxX - minX) / 2);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, L.W, L.ground + 3); ctx.clip();
+  bandPts.forEach((ps, i) => {
+    if (db <= 0) { drawTube(ctx, L.W, L.H, ps, R.bands[i].color, 11 + i * 7); return; }
+    const gap = 0.025 + 0.05 * clamp(db / 0.3); const [r1, r2] = RUP[i];
+    [[0, r1 - gap], [r1 + gap, r2 - gap], [r2 + gap, 1]].forEach(([a, c], q) => { const seg = ps.filter(p => p.s >= a && p.s <= c); if (seg.length > 1) drawTube(ctx, L.W, L.H, seg, R.bands[i].color, 11 + i * 7 + q); });
+  });
+  ctx.restore();
+  // flying clay from each rupture: arcs out, lands and splats on the floor
+  if (db > 0) {
+    const g = 2600 * k;
+    R.bands.forEach((b, i) => RUP[i].forEach((rs, q) => {
+      const idx = Math.round(rs * (b.pts.length - 3)) + 1, o = b.pts[idx];
+      const ox = cx + o.x, oy = L.ground + o.y, nx = o.x / (Math.hypot(o.x, o.y) || 1), ny = o.y / (Math.hypot(o.x, o.y) || 1);
+      const Rn = rng(300 + i * 17 + q * 5);
+      for (let m = 0; m < 7; m++) {
+        const sp = (700 + Rn() * 1300) * k, ang = Math.atan2(ny, nx) + (Rn() - 0.5) * 1.6;
+        const vx = Math.cos(ang) * sp, vy = Math.sin(ang) * sp - 300 * k * Rn(), r = (12 + Rn() * 26) * k;
+        // landing time on the floor band (somewhere between ground and the bottom of frame)
+        const land = L.ground + (0.05 + Rn() * 0.8) * fl, tLand = (-vy + Math.sqrt(Math.max(0, vy * vy + 2 * g * (land - oy)))) / g;
+        const tt = Math.min(db, tLand); const x = ox + vx * tt, y = oy + vy * tt + 0.5 * g * tt * tt;
+        const landed = db >= tLand, sq = landed ? lerp(1, 0.55, clamp((db - tLand) / 0.08)) : 1;
+        if (x > -80 && x < L.W + 80) clayBlob(ctx, x, y, r * (landed ? 1.2 : 1), b.color, 900 + i * 50 + q * 10 + m, sq, landed ? 0 : ang);
+      }
+    }));
+    // splats that hit the screen itself: big flattened clay all over the frame, sliding down slowly
+    const SPL = 16, Rs = rng(4242);
+    for (let m = 0; m < SPL; m++) {
+      const col = BANDS[m % BANDS.length], tx = (0.06 + Rs() * 0.88) * L.W, ty = L.headY + 300 * k + Rs() * (L.H - L.headY - 380 * k);
+      const at = 0.06 + Rs() * 0.3, r = (45 + Rs() * 75) * k, d = db - at; if (d <= 0) continue;
+      const pop = d < 0.12 ? ease(d / 0.12) * 1.15 : 1 + 0.15 * Math.exp(-(d - 0.12) * 12);
+      const slide = Math.max(0, d - 0.4) * (18 + Rs() * 25) * k;
+      clayBlob(ctx, tx, ty + slide, r * pop, col, 7000 + m, 0.82, Rs() * 3);
+    }
+  }
+  playButton(ctx, bx, by, br * (1 - 0.6 * gone), press, 1 - gone);
+  // "Done" pops big over the mess and holds
+  if (t > T.done) {
+    const d = t - T.done;
+    const grow = d < 0.28 ? ease(d / 0.28) * 1.18 : 1 + Math.exp(-(d - 0.28) * 7) * Math.cos((d - 0.28) * 20) * 0.18;
+    const dx = cx, dy = L.ground - 470 * k;
+    if (d < 0.9) {
+      ctx.save(); ctx.translate(dx, dy); ctx.strokeStyle = C.ink; ctx.lineCap = 'round'; ctx.lineWidth = 9 * k; ctx.globalAlpha = 1 - clamp((d - 0.4) / 0.5);
+      for (let r = 0; r < 12; r++) { const a = r / 12 * Math.PI * 2 + 0.13, r0 = (230 + 260 * ease(d / 0.6)) * k, r1 = r0 + 70 * k * (1 - clamp(d / 0.9));
+        ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0 * 0.7); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1 * 0.7); ctx.stroke(); }
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(dx, dy); ctx.rotate(-0.06 * Math.exp(-d * 3)); pill(ctx, 0, 0, 'Done', k * 1.35, '#CDF05B', C.ink, 2.4 * grow); ctx.restore();
+  }
+  // cursor: glides in from lower right, clicks play, drifts out
+  const tip = { x: bx + br * 0.25, y: by + br * 0.2 }; let cur = null;
+  if (t < T.click) { const q = ease((t - 0.3) / (T.click - 0.3)); cur = { x: lerp(L.W + 60, tip.x, q), y: lerp(L.H + 40, tip.y, q) - Math.sin(q * Math.PI) * 60 * k }; }
+  else if (t < T.click + 0.35) cur = tip;
+  else if (t < 2.6) { const q = smooth((t - T.click - 0.35) / 0.85); cur = { x: lerp(tip.x, L.W + 80, q), y: lerp(tip.y, L.H + 60, q) }; }
+  if (cur) drawCursor(ctx, cur.x, cur.y, k * 1.15, press);
 }
 
 function drawFrame(canvas, spotKey, ratio, t, logoImg) {

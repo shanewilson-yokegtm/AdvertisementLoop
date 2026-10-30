@@ -26,3 +26,8 @@ Asset ids follow `ast_clay_<spot>_<ratio>`.
 
 A change to a shared function (headline, end card, rainbow, shading) changes every spot. When feedback is about one spot,
 keep the change inside that spot (`SPOTS.<key>` or a per-spot option) unless the feedback says it applies to the series.
+
+## Output 9x16 v5 (job a67087d0, review 24b70244)
+
+No hand. Cursor hits play, pressure surges through the clay tubes, the tubes burst like a pipe, clay sprays all over
+the screen, the rainbow collapses, then "Done". 9:16 only (`outputBurst`); 4:5 still uses the v4 kneading gag (`drawKnead`).
