@@ -2,30 +2,37 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { sb } from '@/lib/supabase/browser';
-import { useRows, useSigned, can, useInbox, FORMATS, KIND_LABEL, type Asset, type Version, type Review, type Comment } from '@/lib/data';
+import { useRows, useSigned, useMembers, can, useInbox, FORMATS, type Asset, type Version, type Review } from '@/lib/data';
 import { Thumb } from '@/components/Media';
 import { useApp } from '@/components/Shell';
 import Upload from '@/components/Upload';
 import { statusChip, renderChip } from '@/components/Chips';
+import { radioKeys, tab } from '@/lib/radio';
 
 type Item = { a: Asset; v: Version };
 type Concept = { key: string; fs: Item[]; status: 'approved' | 'changes' | 'pending'; at: number };
+type View = 'all' | 'feedback' | 'approved';
 const ORDER = ['vertical', 'feed45', 'square', 'landscape'];
+const fmt = (f: string) => FORMATS[f]?.label || f;
+
+const SearchIcon = () => <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" strokeLinecap="round" /></svg>;
 
 export default function Library() {
-  const { member } = useApp();
+  const { member } = useApp(); const who = useMembers();
   const assets = useRows<Asset>('assets', { order: 'updated_at' });
   const versions = useRows<Version>('versions', { order: 'created_at' });
   const reviews = useRows<Review>('reviews');
-  const comments = useRows<Comment>('comments');
-  const [f, setF] = useState<'all' | 'inbox' | 'everyone' | 'pending' | 'changes' | 'approved'>('all'); const [up, setUp] = useState(false);
+  const [view, setView] = useState<View>('all'); const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [q, setQ] = useState(''); const [up, setUp] = useState(false);
   const isAdmin = member?.role === 'admin';
+  // Feedback is personal by default: ads you own. Admins can deliberately widen it to every owner.
   const mine = useInbox('mine'); const everyone = useInbox('all', isAdmin);
-  const pendingFor = (id: string) => (f === 'everyone' ? everyone : mine).rows.find(r => r.asset_id === id)?.pending || 0;
+  const inbox = scope === 'all' && isAdmin ? everyone : mine;
+  const pendingFor = (id: string) => inbox.rows.find(r => r.asset_id === id)?.pending || 0;
   const latest: Record<string, Version> = {}; versions.rows.forEach(v => { if (!latest[v.asset_id] || latest[v.asset_id].version < v.version) latest[v.asset_id] = v; });
   const rev: Record<string, string> = Object.fromEntries(reviews.rows.map(r => [r.version_id, r.status]));
   const st = (v: Version) => rev[v.id] || 'pending';
-  // The Library is one card per concept. Each format is its own ad underneath; versions stay on the ad page.
+  // One card per concept. Each aspect ratio is its own ad underneath; versions live on the ad page.
   const items = assets.rows.filter(a => latest[a.id]).map(a => ({ a, v: latest[a.id] }));
   const concepts = (list: Item[]) => {
     const by = new Map<string, Item[]>();
@@ -38,54 +45,65 @@ export default function Library() {
     }).sort((x, y) => y.at - x.at);
   };
   const live = concepts(items.filter(x => !x.a.archived)), arch = concepts(items.filter(x => x.a.archived));
-  const inMine = new Set(mine.rows.map(r => r.asset_id)), inAll = new Set(everyone.rows.map(r => r.asset_id));
-  const has = (c: Concept, set: Set<string>) => c.fs.some(x => set.has(x.a.id));
-  const counts = { all: live.length, inbox: live.filter(c => has(c, inMine)).length, everyone: live.filter(c => has(c, inAll)).length, pending: live.filter(c => c.status === 'pending').length, changes: live.filter(c => c.status === 'changes').length, approved: live.filter(c => c.status === 'approved').length };
-  const shown = live.filter(c => f === 'all' || (f === 'inbox' ? has(c, inMine) : f === 'everyone' ? has(c, inAll) : c.status === f));
-  const urls = useSigned(items.flatMap(x => [x.v.poster_path || (x.v.content_type?.startsWith('image/') ? x.v.file_path : null)]));
-  const openC = (c: Concept) => comments.rows.filter(m => c.fs.some(x => x.a.id === m.asset_id) && m.status === 'open').length;
+  const owners = (c: Concept) => [...new Set(c.fs.map(x => who(x.a.owner_id, x.a.legacy_creator)))].join(', ');
   const pendingC = (c: Concept) => c.fs.reduce((n, x) => n + pendingFor(x.a.id), 0);
+  const counts = { all: live.length, feedback: live.filter(c => pendingC(c) > 0).length, approved: live.filter(c => c.status === 'approved').length };
+  const needle = q.trim().toLowerCase();
+  const shown = live.filter(c => (view === 'all' || (view === 'feedback' ? pendingC(c) > 0 : c.status === 'approved'))
+    && (!needle || c.fs[0].a.concept_name.toLowerCase().includes(needle) || owners(c).toLowerCase().includes(needle)));
+  const urls = useSigned(items.flatMap(x => [x.v.poster_path || (x.v.content_type?.startsWith('image/') ? x.v.file_path : null)]));
   const download = async (fs: Item[]) => {
     for (const { a, v } of fs) {
       if (!v.file_path) continue;
-      const name = `${a.concept_name.replace(/[^\w -]/g, '').trim().slice(0, 60)} ${FORMATS[a.format]?.label.replace(':', 'x') || a.format}.${v.file_path.split('.').pop()}`;
+      const name = `${a.concept_name.replace(/[^\w -]/g, '').trim().slice(0, 60)} ${fmt(a.format).replace(':', 'x')}.${v.file_path.split('.').pop()}`;
       const { data } = await sb().storage.from('ad-assets').createSignedUrl(v.file_path, 600, { download: name });
       if (!data?.signedUrl) continue;
       const el = document.createElement('a'); el.href = data.signedUrl; el.rel = 'noopener'; document.body.appendChild(el); el.click(); el.remove();
       await new Promise(r => setTimeout(r, 400)); // browsers drop back-to-back downloads
     }
   };
-  const card = (c: Concept) => { const { a, v } = c.fs[0]; const n = pendingC(c), o = openC(c);
-    return <div key={c.key} className="card">
+  const closeMenu = (e: React.MouseEvent) => { const d = (e.currentTarget as HTMLElement).closest('details'); if (d) d.open = false; };
+  const card = (c: Concept) => { const { a, v } = c.fs[0]; const n = pendingC(c);
+    const title = a.concept_name.trim();
+    return <article key={c.key} className="card" aria-label={title}>
       <Link className="cardlink" href={`/a/${a.id}`}>
-        <div className={`thumb ${a.format}`}><Thumb v={v} urls={urls} /></div>
-        <div className="body"><div className="t">{a.concept_name.trim()}</div>
-          <div className="row">{renderChip(v) || statusChip(c.status)}
-            {n ? <span className="chip warn">Feedback · {n}</span> : o ? <span className="chip">Feedback · {o}</span> : null}</div></div>
+        <div className="frame">
+          <span className="badge">{renderChip(v) || statusChip(c.status)}</span>
+          {n ? <span className="count" aria-label={`${n} feedback to decide`}>{n}</span> : null}
+          <div className={`thumb ${a.format}`}><Thumb v={v} urls={urls} /></div>
+        </div>
+        <div className="meta"><div className="t">{title}</div><div className="sub">{owners(c)}</div></div>
       </Link>
-      <div className="body formats">
-        <div className="row" aria-label="Formats">{c.fs.map(x => <Link key={x.a.id} className="chip" href={`/a/${x.a.id}`}>{FORMATS[x.a.format]?.label || x.a.format}</Link>)}</div>
-        {c.status === 'approved' ? <div className="row">
-          {c.fs.length > 1 ? <button className="btn small primary" onClick={() => download(c.fs)}>Download all</button> : null}
-          {c.fs.map(x => <button key={x.a.id} className="btn small" onClick={() => download([x])}>{FORMATS[x.a.format]?.label || x.a.format}</button>)}
-        </div> : null}
+      <div className="foot">
+        <div className="fmts" aria-label="Formats">{c.fs.map(x => <Link key={x.a.id} href={`/a/${x.a.id}`} aria-label={`${title}, ${fmt(x.a.format)}`}>{fmt(x.a.format)}</Link>)}</div>
+        {c.status === 'approved' && c.fs.some(x => x.v.file_path) ? <details className="dd">
+          <summary className="btn small" aria-label={`Download ${title}`}>Download</summary>
+          <div className="menu" role="menu">
+            {c.fs.length > 1 ? <button role="menuitem" type="button" className="mi" onClick={e => { closeMenu(e); void download(c.fs); }}>Download all<span className="muted">{c.fs.length} files</span></button> : null}
+            {c.fs.map(x => <button role="menuitem" type="button" key={x.a.id} className="mi" onClick={e => { closeMenu(e); void download([x]); }}>{fmt(x.a.format)}</button>)}
+          </div></details> : null}
       </div>
-    </div>; };
+    </article>; };
   const err = assets.err || versions.err;
+  const VIEWS: [View, string][] = [['all', 'All'], ['feedback', 'Feedback for you'], ['approved', 'Approved']];
   return <>
-    <div className="head"><h1>Library</h1><div className="row">
-      {can(member, 'creator') ? <button className="btn" onClick={() => setUp(true)}>Upload</button> : null}
-      <Link className="btn primary" href="/create">Create an ad</Link></div></div>
+    <div className="head"><h1>Library</h1>
+      {can(member, 'creator') ? <button className="btn ghost" onClick={() => setUp(true)}>Upload</button> : null}</div>
     {err ? <div className="banner err" style={{ marginBottom: 16 }}>Couldn&apos;t load the Library · {err}</div> : null}
-    <div className="tabs" role="group" aria-label="Filter">{([['all', 'All'], ['inbox', 'Feedback to process'], ...(isAdmin ? [['everyone', 'Everyone’s feedback']] as const : []), ['pending', 'Needs review'], ['changes', 'Changes requested'], ['approved', 'Approved']] as const).map(([k, l]) =>
-      <button key={k} aria-pressed={f === k} onClick={() => setF(k)}>{l} · {counts[k]}</button>)}</div>
-    {f === 'approved' ? <p className="muted">Every format of these concepts is approved. Download one format or all.</p> : f === 'inbox' ? <p className="muted">Concepts you own with feedback to decide. Open one and process it.</p> : f === 'everyone' ? <p className="muted">Admin view: every owner’s pending feedback. Processing someone else’s ad keeps them as owner.</p> : null}
+    <div className="tools">
+      <div className="seg" role="radiogroup" aria-label="Show" onKeyDown={radioKeys}>{VIEWS.map(([k, l]) =>
+        <button key={k} type="button" role="radio" aria-checked={view === k} tabIndex={tab(view === k)} onClick={() => setView(k)}>{l}<span className="n">{counts[k]}</span></button>)}</div>
+      {isAdmin && view === 'feedback' ? <div className="seg sm" role="radiogroup" aria-label="Whose feedback" onKeyDown={radioKeys}>
+        {([['mine', 'Yours'], ['all', 'Everyone’s']] as const).map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={scope === k} tabIndex={tab(scope === k)} onClick={() => setScope(k)}>{l}</button>)}</div> : null}
+      <label className="search"><span className="sr">Search concepts or owners</span><SearchIcon /><input type="search" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} /></label>
+    </div>
+    {view === 'feedback' ? <p className="hint" style={{ marginTop: -12, marginBottom: 20 }}>{scope === 'all' && isAdmin ? 'Every owner’s feedback waiting for a decision. Deciding keeps them as owner.' : 'Ads you own with feedback waiting for your approve or reject.'}</p> : null}
     {!assets.ready ? <div className="empty"><span className="muted">Loading</span></div>
-      : !live.length ? <div className="empty"><h2>No ads yet</h2><Link className="btn primary" href="/create">Create an ad</Link></div>
-      : !shown.length ? <div className="empty"><span className="muted">Nothing here</span></div>
+      : !live.length ? <div className="empty"><h2>No ads yet</h2><span className="muted">Ads you make land here for the team to review.</span><Link className="btn primary" href="/create">Create an ad</Link></div>
+      : !shown.length ? <div className="empty"><span className="muted">{needle ? `Nothing matches “${q.trim()}”` : view === 'feedback' ? 'No feedback waiting on you' : view === 'approved' ? 'Nothing approved yet' : 'Nothing here'}</span></div>
       : <div className="grid">{shown.map(card)}</div>}
-    {arch.length ? <details style={{ marginTop: 32 }}><summary className="muted" style={{ cursor: 'pointer', fontWeight: 600 }}>Rejected and archived · {arch.length}</summary>
-      <p className="muted">Earlier concepts kept for reference.</p><div className="grid">{arch.map(card)}</div></details> : null}
+    {arch.length ? <details className="disc" style={{ marginTop: 40 }}><summary>Rejected and archived<span className="muted">{arch.length}</span></summary>
+      <div className="inner"><div className="grid">{arch.map(card)}</div></div></details> : null}
     {up ? <Upload onClose={() => setUp(false)} /> : null}
   </>;
 }

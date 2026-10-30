@@ -30,7 +30,8 @@ function useClaudeOn() {
   useEffect(() => { fetch('/api/health').then(r => r.json()).then(j => setOn(!!j?.configured?.claude)).catch(() => setOn(false)); }, []);
   return on;
 }
-const ClaudeOff = ({ on }: { on: boolean | null }) => (on === false ? <div className="banner" role="status"><span><b>Claude: off</b> · replies switch on once an Anthropic API key is added. Messages and type choices are still saved.</span></div> : null);
+// Only the chat composer (Static, Infographic video) needs Claude replies; Higgsfield renders without it.
+const ClaudeOff = ({ on }: { on: boolean | null }) => (on === false ? <p className="hint" role="status">Claude replies here are switched off for now. Your idea is still saved, and the Claude skill can make it.</p> : null);
 
 export function CreateHome() {
   const { member, toast } = useApp(); const router = useRouter(); const who = useMembers();
@@ -39,8 +40,7 @@ export function CreateHome() {
   const claudeOn = useClaudeOn(); const hf = useHiggsfieldOn();
   const hfForm = t === 'higgsfield' && hf;
   return <>
-    <div className="head"><h1>Create an ad</h1>{claudeOn === false ? <span className="chip">Claude: off</span> : claudeOn ? <span className="chip live">Claude: on</span> : null}</div>
-    <div style={{ marginBottom: 12 }}><ClaudeOff on={claudeOn} /></div>
+    <div className="head"><h1>Create an ad</h1></div>
     {!can(member, 'creator') ? <div className="banner" style={{ marginBottom: 12 }}>View-only access · ask Shane for Creator</div> : null}
     {hfForm ? <div className="composer panel"><TypeBar value={t} onChange={setT} hf={hf} />
       <HiggsfieldForm initialPrompt={text} disabled={!can(member, 'creator')} toast={toast} /></div> :
@@ -54,7 +54,7 @@ export function CreateHome() {
       } catch { toast('Couldn’t start. Your idea is still here; please retry.'); }
       finally { setBusy(false); }
     }}>
-      <TypeBar value={t} onChange={setT} hf={hf} /><TypeNote t={t} hf={hf} />
+      <TypeBar value={t} onChange={setT} hf={hf} /><TypeNote t={t} hf={hf} /><ClaudeOff on={claudeOn} />
       <label className="f">What&apos;s the ad?<textarea rows={3} value={text} onChange={e => setText(e.target.value)} placeholder="Owners who keep saying they'll follow up next week" /></label>
       <div className="row" style={{ justifyContent: 'space-between' }}><span className="muted">Pick a type, describe the idea. Drafts land in the Library.</span><button className="btn primary" disabled={busy || !can(member, 'creator')}>Start</button></div>
     </form>}
@@ -167,7 +167,7 @@ export function ChatView({ id }: { id: string }) {
   return <div className="chatwrap">
     <div className="head" style={{ margin: 0 }}><div style={{ minWidth: 0 }}><Link href="/create" className="muted">← All ads</Link><h1>{chat.title}</h1></div>
       {chat.asset_id ? <Link className="btn" href={`/a/${chat.asset_id}`}>Open in Library</Link> : null}</div>
-    <div className="thread" role="log" aria-live="polite">
+    <div className="msgs" role="log" aria-live="polite">
       {!msgs.rows.length ? <div className="muted">Tell Claude the idea. Pick Static, Infographic video or Higgsfield video.</div> : msgs.rows.map((m: any) => <div key={m.id} className={'msg ' + (m.role === 'user' ? 'me' : 'ai')}>
         <div className="who">{m.role === 'user' ? who(m.author) : 'Claude'}{m.create_type ? ' · ' + TYPES.find(x => x[0] === m.create_type)?.[1] : ''}{m.role !== 'user' && m.author ? ' · asked by ' + who(m.author) : ''} · {fmtDate(m.at)}</div>
         <div className="txt">{m.body}</div>
