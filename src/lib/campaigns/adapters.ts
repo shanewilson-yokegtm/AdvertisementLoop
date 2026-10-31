@@ -20,8 +20,14 @@ export interface CampaignAdapter {
   buildPaused(plan: ChannelPlan, operationId: string): Promise<{ platformIds: Record<string, string>; receiptRef: string }>;
   verifyPaused(platformIds: Record<string, string>, plan: ChannelPlan): Promise<{ matches: boolean; previewRefs: string[]; differences: string[] }>;
   activate(platformIds: Record<string, string>, authorizationId: string, operationId: string): Promise<{ state: 'active' | 'partial' | 'unknown'; receiptRef: string }>;
-  /** Read-only lookup of what the platform holds for this operation. Used as before-state evidence and to resolve unknowns. */
-  reconcile(operationId: string, step: ExecutionStep): Promise<{ state: PlatformState; evidenceRefs: string[]; platformIds?: Record<string, string> }>;
+  /** Read-only lookup of what the platform holds for this operation. Used as before-state evidence and to resolve unknowns.
+   * Set `terminalNoEffect` only when the provider authoritatively reports that this operation has finished without
+   * effect and cannot apply later (for example a closed request/job id). A plain "not found" is not enough: a
+   * timed-out request may still be in flight. */
+  reconcile(operationId: string, step: ExecutionStep): Promise<{ state: PlatformState; evidenceRefs: string[]; platformIds?: Record<string, string>; terminalNoEffect?: boolean }>;
+  /** Steps for which the provider deduplicates by `operationId`, with a documentation reference. Only then may an
+   * absent lookup release an unknown step for retry without terminal evidence. */
+  providerIdempotency?: Partial<Record<ExecutionStep, string>>;
   observe(platformIds: Record<string, string>): Promise<{ observedAt: string; settings: ChannelPlan; evidenceRef: string; editor: string | null }>;
 }
 

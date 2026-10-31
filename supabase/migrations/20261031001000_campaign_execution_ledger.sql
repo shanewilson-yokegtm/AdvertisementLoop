@@ -2,7 +2,12 @@
 -- One row per launch authorization / channel / step. A step is claimed and persisted BEFORE any external call,
 -- carries the intended payload hash and before-state evidence, and ends with a receipt. A claim whose worker
 -- disappears, or whose outcome is not known, becomes `unknown` and must be reconciled against the platform
--- before the step can run again. Nothing here retries on its own.
+-- before the step can run again. Nothing here retries on its own. Status meanings:
+--   succeeded  external effect confirmed (receipt or reconciled evidence)
+--   failed     platform definitively rejected the call; nothing was written
+--   blocked    the worker stopped under its claim before any external call (e.g. pre-activation readback drift)
+--   unknown    an effect may exist or may still land; only authoritative evidence resolves it
+--   absent     authoritative evidence that the attempt cannot take effect; the step may be claimed again
 create table public.campaign_execution_steps (
   operation_id text primary key check (operation_id ~ '^yx_[a-f0-9]{32}$'),
   campaign_id text not null references public.campaign_records(id),
@@ -11,7 +16,7 @@ create table public.campaign_execution_steps (
   step text not null check (step in ('build_paused','verify_paused','activate')),
   plan_fingerprint text not null,
   payload_hash text not null,
-  status text not null check (status in ('claimed','succeeded','failed','unknown','absent')),
+  status text not null check (status in ('claimed','succeeded','failed','blocked','unknown','absent')),
   attempt integer not null default 1 check (attempt > 0),
   worker_id text not null,
   before_state jsonb not null,
@@ -117,7 +122,7 @@ create function public.campaign_step_complete(
 declare s public.campaign_execution_steps;
 begin
   if not app_private.is_server() then raise exception 'server only' using errcode='42501'; end if;
-  if p_outcome not in ('succeeded','failed','unknown') then raise exception 'invalid outcome' using errcode='22023'; end if;
+  if p_outcome not in ('succeeded','failed','blocked','unknown') then raise exception 'invalid outcome' using errcode='22023'; end if;
   if p_receipt is null then raise exception 'receipt required' using errcode='22023'; end if;
   perform pg_advisory_xact_lock(hashtextextended(p_operation, 0));
   select * into s from public.campaign_execution_steps where operation_id = p_operation for update;
@@ -141,11 +146,20 @@ begin
   if not app_private.is_server() then raise exception 'server only' using errcode='42501'; end if;
   if p_finding not in ('applied','absent','unknown') then raise exception 'invalid finding' using errcode='22023'; end if;
   if p_evidence is null then raise exception 'evidence required' using errcode='22023'; end if;
+  -- A point-in-time "not found" does not prove a request still in flight cannot land later. Release a step for
+  -- retry only on authoritative terminal evidence, documented provider idempotency for this operation, or a
+  -- read-only step.
+  if p_finding = 'absent' and coalesce(p_evidence->>'basis','') not in ('terminal_no_effect','provider_idempotency','read_only') then
+    raise exception 'absent requires terminal no-effect, provider idempotency or read-only evidence' using errcode='22023';
+  end if;
   perform pg_advisory_xact_lock(hashtextextended(p_operation, 0));
   select * into s from public.campaign_execution_steps where operation_id = p_operation for update;
   if s.operation_id is null then raise exception 'unknown operation' using errcode='22023'; end if;
   if s.status = 'claimed' and s.lease_expires_at > now() then raise exception 'step is held by a live claim' using errcode='40001'; end if;
   if s.status not in ('unknown','claimed') then raise exception 'only unknown steps are reconciled' using errcode='40001'; end if;
+  if p_finding = 'absent' and p_evidence->>'basis' = 'read_only' and s.step <> 'verify_paused' then
+    raise exception 'read-only basis applies only to readback steps' using errcode='22023';
+  end if;
   prior := s.status;
   update public.campaign_execution_steps set
     status = case p_finding when 'applied' then 'succeeded' when 'absent' then 'absent' else 'unknown' end,
@@ -157,9 +171,50 @@ begin
   return to_jsonb(s);
 end $$;
 
+-- Append evidence gathered under a live claim (e.g. the fresh pre-activation readback) before the external call.
+create function public.campaign_step_evidence(p_operation text, p_worker text, p_attempt integer, p_evidence jsonb)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare s public.campaign_execution_steps;
+begin
+  if not app_private.is_server() then raise exception 'server only' using errcode='42501'; end if;
+  if p_evidence is null then raise exception 'evidence required' using errcode='22023'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_operation, 0));
+  select * into s from public.campaign_execution_steps where operation_id = p_operation for update;
+  if s.operation_id is null or s.status <> 'claimed' or s.worker_id <> p_worker or s.attempt <> p_attempt or s.lease_expires_at <= now() then
+    raise exception 'stale claim: this worker no longer holds the step' using errcode='40001';
+  end if;
+  insert into public.campaign_execution_log(operation_id,campaign_id,attempt,from_status,to_status,worker_id,evidence)
+    values(s.operation_id,s.campaign_id,s.attempt,'claimed','claimed',p_worker,p_evidence);
+end $$;
+
+-- Fence: while any step is claimed or unknown, or once a channel has been activated, the memo, approval and launch
+-- authorization cannot change (and an unresolved campaign cannot close). This keeps an in-flight or unknown
+-- external effect from being orphaned and a renewed authorization from starting a second launch. Changing a live
+-- campaign needs a separate, reviewed change workflow.
+create function app_private.campaign_execution_fence() returns trigger language plpgsql set search_path = '' as $$
+declare plan_change boolean; closing boolean;
+begin
+  plan_change := (old.state->'brief') is distinct from (new.state->'brief')
+    or (old.state->'approval') is distinct from (new.state->'approval')
+    or (old.state->'launch'->>'id') is distinct from (new.state->'launch'->>'id');
+  closing := new.state->>'status' = 'closed' and old.state->>'status' is distinct from 'closed';
+  if not (plan_change or closing) then return new; end if;
+  if exists (select 1 from public.campaign_execution_steps where campaign_id = new.id and status in ('claimed','unknown')) then
+    raise exception 'execution unresolved: a launch step is in flight or unknown; reconcile it before changing or closing the campaign' using errcode='40001';
+  end if;
+  if plan_change and exists (select 1 from public.campaign_execution_steps where campaign_id = new.id and step = 'activate' and status = 'succeeded') then
+    raise exception 'campaign is live: plan, approval and authorization changes need a separate change workflow' using errcode='40001';
+  end if;
+  return new;
+end $$;
+create trigger campaign_execution_fence before update on public.campaign_records
+  for each row execute function app_private.campaign_execution_fence();
+
 revoke all on function public.campaign_step_claim(text,text,text,text,text,text,text,jsonb,text,integer) from public,anon,authenticated;
 revoke all on function public.campaign_step_complete(text,text,integer,text,jsonb,jsonb) from public,anon,authenticated;
 revoke all on function public.campaign_step_reconcile(text,text,text,jsonb,jsonb) from public,anon,authenticated;
+revoke all on function public.campaign_step_evidence(text,text,integer,jsonb) from public,anon,authenticated;
+grant execute on function public.campaign_step_evidence(text,text,integer,jsonb) to service_role;
 grant execute on function public.campaign_step_claim(text,text,text,text,text,text,text,jsonb,text,integer) to service_role;
 grant execute on function public.campaign_step_complete(text,text,integer,text,jsonb,jsonb) to service_role;
 grant execute on function public.campaign_step_reconcile(text,text,text,jsonb,jsonb) to service_role;

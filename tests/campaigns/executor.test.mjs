@@ -60,34 +60,36 @@ async function setup() {
   return { db, client, api, authorized, steps };
 }
 
-/** In-memory platform keyed by operation id. `fault` hooks let a test inject crashes, hangs and rejections. */
+/** In-memory platform keyed by operation id. `fault` hooks let a test inject crashes, hangs and rejections.
+ * `inflight` models the provider's own view of requests that have not settled: while one is open, a lookup that
+ * finds nothing is NOT terminal. */
 function fakePlatform(fault = {}) {
-  const ops = new Map(); const calls = { build: 0, verify: 0, activate: 0, reconcile: 0 };
+  const ops = new Map(); const inflight = new Set(); const calls = { build: 0, verify: 0, activate: 0, reconcile: 0, preflight: 0 };
+  const track = (op, p) => { inflight.add(op); return Promise.resolve(p).finally(() => inflight.delete(op)); };
   const adapter = {
-    channel: 'meta',
-    async preflight() { return { ready: true, evidenceRefs: [], blockers: [] }; },
-    async buildPaused(plan, op) {
-      calls.build++; if (fault.build) return fault.build(op, ops);
-      ops.set(op, { state: 'paused', ids: { campaign: 'c-' + op.slice(3, 9) } });
-      return { platformIds: ops.get(op).ids, receiptRef: 'build:' + op };
+    channel: fault.channel || 'meta',
+    async preflight(plan) { calls.preflight++; if (fault.preflight) return fault.preflight(calls.preflight); return { ready: true, evidenceRefs: ['account:' + plan.accountId], blockers: [] }; },
+    buildPaused(plan, op) {
+      calls.build++;
+      return track(op, fault.build ? fault.build(op, ops) : (ops.set(op, { state: 'paused', ids: { campaign: 'c-' + op.slice(3, 9) } }), { platformIds: ops.get(op).ids, receiptRef: 'build:' + op }));
     },
     async verifyPaused(ids, plan) {
-      calls.verify++; if (fault.verify) return fault.verify(ids);
+      calls.verify++; if (fault.verify) return fault.verify(ids, calls.verify);
       return { matches: true, previewRefs: ['preview:' + ids.campaign], differences: [] };
     },
-    async activate(ids, authId, op) {
-      calls.activate++; if (fault.activate) return fault.activate(op, ops);
-      ops.set(op, { state: 'active' }); return { state: 'active', receiptRef: 'activate:' + op };
+    activate(ids, authId, op) {
+      calls.activate++;
+      return track(op, fault.activate ? fault.activate(op, ops) : (ops.set(op, { state: 'active' }), { state: 'active', receiptRef: 'activate:' + op }));
     },
     // Activation is looked up on the built campaign: with no activation recorded it is still paused.
     async reconcile(op, step) {
       calls.reconcile++; const o = ops.get(op);
       const built = [...ops.values()].some(v => v.ids);
-      return { state: o?.state ?? (step === 'activate' && built ? 'paused' : 'absent'), evidenceRefs: ['lookup:' + op], platformIds: o?.ids };
+      return { state: o?.state ?? (step === 'activate' && built ? 'paused' : 'absent'), evidenceRefs: ['lookup:' + op], platformIds: o?.ids, terminalNoEffect: !o && !inflight.has(op) };
     },
     async observe() { throw new Error('not used'); },
   };
-  return { adapter, ops, calls };
+  return { adapter, ops, calls, inflight };
 }
 const run = (env, id, platform, extra = {}) => executeLaunch({ db: env.client, campaignId: id, workerId: extra.workerId || 'worker-a', adapters: { meta: platform.adapter }, leaseSeconds: 60, stepTimeoutMs: 200, ...extra });
 
@@ -110,10 +112,13 @@ test('happy path builds paused, verifies, activates once; repeated commands reus
     { step: 'build_paused', status: 'succeeded', attempt: 1 }, { step: 'verify_paused', status: 'succeeded', attempt: 1 }, { step: 'activate', status: 'succeeded', attempt: 1 }]);
   const [again] = await run(env, c.id, p, { workerId: 'worker-b' });
   assert.equal(again.status, 'active');
-  assert.deepEqual(p.calls, { build: 1, verify: 1, activate: 1, reconcile: 6 }); // reconcile = read-only before-state only
+  // verify twice = recorded readback + fresh readback under the activation claim; preflight before build and activation.
+  assert.deepEqual(p.calls, { build: 1, verify: 2, activate: 1, reconcile: 6, preflight: 4 }); // reconcile = read-only before-state only
   const row = (await env.db.query(`select before_state,payload_hash,receipt from campaign_execution_steps where operation_id='${operationId(c.launch.id, 'meta', 'activate')}'`)).rows[0];
-  assert.equal(row.before_state.state, 'paused'); assert.match(row.payload_hash, /^[a-f0-9]{64}$/); assert.equal(row.receipt.state, 'active');
-  assert.equal((await env.db.query(`select count(*)::int n from campaign_execution_log where campaign_id='${c.id}'`)).rows[0].n, 6);
+  assert.equal(row.before_state.platform.state, 'paused'); assert.deepEqual(row.before_state.preflight.evidenceRefs, ['account:' + fixture.channels[0].accountId]); assert.match(row.payload_hash, /^[a-f0-9]{64}$/); assert.equal(row.receipt.state, 'active');
+  assert.equal((await env.db.query(`select count(*)::int n from campaign_execution_log where campaign_id='${c.id}'`)).rows[0].n, 7);
+  const readback = (await env.db.query(`select evidence from campaign_execution_log where operation_id='${operationId(c.launch.id, 'meta', 'activate')}' and from_status='claimed' and to_status='claimed'`)).rows;
+  assert.equal(readback.length, 1); assert.equal(readback[0].evidence.preActivationReadback.matches, true);
   await env.db.close();
 });
 
@@ -179,7 +184,10 @@ test('timeouts, partial activation and definite rejections are recorded as such'
   const hang = fakePlatform({ activate: () => new Promise(() => {}) });
   const [h] = await run(env, c.id, hang, { stepTimeoutMs: 30 });
   assert.equal(h.status, 'needs_reconciliation'); assert.equal(h.step, 'activate'); assert.match(h.detail, /timed out/);
-  assert.equal((await reconcileStep({ db: env.client, workerId: 'r' }, hang.adapter, h.operationId)).status, 'absent'); // platform still paused
+  // Still paused right now, but the request is still open: that is not proof it cannot land. Stays unknown.
+  assert.equal((await reconcileStep({ db: env.client, workerId: 'r' }, hang.adapter, h.operationId)).status, 'unknown');
+  await assert.rejects(c.send(creator, 4, 'rebrief', { type: 'save_brief', brief: { ...fixture, offer: 'New' } }), /unresolved/);
+  await assert.rejects(c.send(admin, 4, 'reapprove', { type: 'approve', fingerprint: c.fingerprint }), /unresolved/);
   const c2 = await env.authorized('partial');
   const partial = fakePlatform({ activate: async (op, ops) => { ops.set(op, { state: 'partial' }); return { state: 'partial', receiptRef: 'p' }; } });
   const [pt] = await run(env, c2.id, partial);
@@ -231,5 +239,81 @@ test('ledger is server-only and its history cannot be erased', async () => {
   await assert.rejects(env.db.query(`select campaign_step_reconcile('x','w','applied','{}')`), /permission denied/);
   await assert.rejects(env.db.exec(`update campaign_execution_steps set status='succeeded'`), /permission denied/);
   await env.db.exec('reset role;');
+  await env.db.close();
+});
+
+test('a late-landing request is not released by an early "not found"; no duplicate effect', async () => {
+  const env = await setup(); const c = await env.authorized('late');
+  let land;
+  const p = fakePlatform({ build: (op, ops) => new Promise(r => { land = () => { ops.set(op, { state: 'paused', ids: { campaign: 'c-late' } }); r({ platformIds: { campaign: 'c-late' }, receiptRef: 'b' }); }; }) });
+  const [t] = await run(env, c.id, p, { stepTimeoutMs: 30 });
+  assert.equal(t.status, 'needs_reconciliation'); assert.match(t.detail, /timed out/);
+  const early = await reconcileStep({ db: env.client, workerId: 'r' }, p.adapter, t.operationId);
+  assert.equal(early.status, 'unknown'); // nothing found yet, but the request is still open
+  assert.equal((await run(env, c.id, p))[0].status, 'needs_reconciliation');
+  // The database also refuses an "absent" release without authoritative evidence.
+  const forced = await env.client.rpc('campaign_step_reconcile', { p_operation: t.operationId, p_worker: 'x', p_finding: 'absent', p_evidence: { state: 'absent' } });
+  assert.match(forced.error.message, /terminal no-effect/);
+  land(); await new Promise(r => setTimeout(r, 10)); // the old request lands after the timeout
+  assert.equal((await reconcileStep({ db: env.client, workerId: 'r' }, p.adapter, t.operationId)).status, 'succeeded');
+  assert.equal((await run(env, c.id, p))[0].status, 'active');
+  assert.equal(p.calls.build, 1); assert.equal([...p.ops.values()].filter(v => v.ids).length, 1);
+  const log = (await env.db.query(`select to_status, evidence->>'basis' basis from campaign_execution_log where operation_id='${t.operationId}' order by id`)).rows;
+  assert.deepEqual(log.map(r => r.to_status), ['claimed', 'unknown', 'unknown', 'succeeded']);
+  await env.db.close();
+});
+
+test('preflight gates the build and the activation; fresh readback drift blocks activation', async () => {
+  const env = await setup();
+  const c = await env.authorized('preflight');
+  const notReady = fakePlatform({ preflight: () => ({ ready: false, evidenceRefs: [], blockers: ['Pixel not verified'] }) });
+  const [nr] = await run(env, c.id, notReady);
+  assert.equal(nr.status, 'blocked'); assert.match(nr.detail, /Pixel not verified/); assert.equal(notReady.calls.build, 0); assert.deepEqual(await env.steps(c.id), []);
+  const noEvidence = fakePlatform({ preflight: () => ({ ready: true, evidenceRefs: [], blockers: [] }) });
+  assert.match((await run(env, c.id, noEvidence))[0].detail, /no account evidence/);
+  const lateFail = fakePlatform({ preflight: n => n === 1 ? { ready: true, evidenceRefs: ['acct'], blockers: [] } : { ready: false, evidenceRefs: ['acct'], blockers: ['Role revoked'] } });
+  const [lf] = await run(env, c.id, lateFail);
+  assert.equal(lf.status, 'blocked'); assert.match(lf.detail, /before activation.*Role revoked/); assert.equal(lateFail.calls.activate, 0);
+  assert.equal((await env.db.query(`select count(*)::int n from campaign_execution_steps where campaign_id='${c.id}' and step='activate'`)).rows[0].n, 0);
+
+  // A colleague edits the paused campaign after the recorded readback: the fresh readback under the claim catches it.
+  const c2 = await env.authorized('drift');
+  const drift = fakePlatform({ verify: (ids, n) => n === 1 ? { matches: true, previewRefs: ['p'], differences: [] } : { matches: false, previewRefs: ['p2'], differences: ['daily budget 500 != 100 (edited by colleague)'] } });
+  const [d] = await run(env, c2.id, drift);
+  assert.equal(d.status, 'blocked'); assert.equal(d.step, 'activate'); assert.match(d.detail, /drifted.*500/); assert.equal(drift.calls.activate, 0);
+  const act = (await env.db.query(`select status, receipt from campaign_execution_steps where operation_id='${d.operationId}'`)).rows[0];
+  assert.equal(act.status, 'blocked'); assert.equal(act.receipt.preActivationReadback.matches, false);
+  const ev = (await env.db.query(`select evidence from campaign_execution_log where operation_id='${d.operationId}' and to_status='claimed' and from_status='claimed'`)).rows;
+  assert.equal(ev[0].evidence.preActivationReadback.differences[0], 'daily budget 500 != 100 (edited by colleague)');
+  assert.equal((await run(env, c2.id, fakePlatform()))[0].status, 'blocked'); // a blocked activation is not silently retried
+  await env.db.close();
+});
+
+test('reconcile is bound to the recorded channel', async () => {
+  const env = await setup(); const c = await env.authorized('channel');
+  const p = fakePlatform({ build: async () => { throw new Error('reset'); } });
+  const [u] = await run(env, c.id, p);
+  const linkedin = fakePlatform({ channel: 'linkedin' });
+  await assert.rejects(reconcileStep({ db: env.client, workerId: 'r' }, linkedin.adapter, u.operationId), /linkedin cannot reconcile a meta/);
+  assert.equal(linkedin.calls.reconcile, 0);
+  assert.equal((await env.steps(c.id))[0].status, 'unknown');
+  await env.db.close();
+});
+
+test('memo or authorization changes are fenced while a step is in flight, unknown, or the campaign is live', async () => {
+  const env = await setup(); const c = await env.authorized('fence');
+  const attempts = [];
+  const p = fakePlatform({ build: async (op, ops) => {
+    // Claim is recorded; the external call has not happened yet. Colleagues try to change the plan right now.
+    attempts.push(await c.send(creator, 4, 'midbrief', { type: 'save_brief', brief: { ...fixture, offer: 'Mid-flight' } }).then(() => 'saved', e => e.message));
+    attempts.push(await c.send(admin, 4, 'midauth', { type: 'approve', fingerprint: c.fingerprint }).then(() => 'saved', e => e.message));
+    ops.set(op, { state: 'paused', ids: { campaign: 'c-f' } }); return { platformIds: { campaign: 'c-f' }, receiptRef: 'b' };
+  } });
+  const [out] = await run(env, c.id, p, { stepTimeoutMs: 5000 });
+  assert.equal(out.status, 'active');
+  assert.equal(attempts.length, 2); for (const a of attempts) assert.match(a, /unresolved/);
+  // Live: a renewed plan/authorization would start a second launch, so it is refused.
+  await assert.rejects(c.send(creator, 4, 'livebrief', { type: 'save_brief', brief: { ...fixture, offer: 'After launch' } }), /campaign is live/);
+  assert.equal((await env.api(creator, 'GET', [c.id])).state.revision, 4);
   await env.db.close();
 });
