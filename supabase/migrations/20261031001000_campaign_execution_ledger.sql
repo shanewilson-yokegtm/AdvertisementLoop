@@ -55,6 +55,22 @@ create trigger campaign_history_immutable before update or delete on public.camp
 create trigger campaign_history_immutable before delete on public.campaign_execution_steps
   for each row execute function app_private.campaign_history_immutable();
 
+-- True when the campaign still holds exactly this authorization: same launch id and fingerprint, approval of the
+-- same plan, status launch_authorized, and neither the authorization nor the spending window has expired.
+create function app_private.campaign_launch_current(p_campaign text, p_launch text, p_fingerprint text)
+returns boolean language sql stable set search_path = '' as $$
+  select coalesce((select r.state->'launch'->>'id' = p_launch
+      and r.state->'launch'->>'fingerprint' = p_fingerprint
+      and r.state->'approval'->>'fingerprint' = p_fingerprint
+      and r.state->'launch'->>'status' = 'authorized'
+      and r.state->>'status' = 'launch_authorized'
+      and (r.state->'launch'->>'expiresAt')::timestamptz > now()
+      and (r.state->'brief'->>'spendEndsAt')::timestamptz > now()
+    from public.campaign_records r where r.id = p_campaign), false)
+$$;
+revoke all on function app_private.campaign_launch_current(text,text,text) from public, anon, authenticated;
+grant execute on function app_private.campaign_launch_current(text,text,text) to service_role;
+
 -- Claim a step. Returns {claimed, step}. claimed=false means: already succeeded (reuse its receipt), held by a live
 -- claim, or needs reconciliation/attention. An expired claim becomes `unknown` here, never re-run.
 create function public.campaign_step_claim(
@@ -68,11 +84,7 @@ begin
   perform pg_advisory_xact_lock(hashtextextended(p_operation, 0));
   -- The campaign must still hold this exact authorization. Lock it so a concurrent memo edit serializes with the claim.
   select * into rec from public.campaign_records where id = p_campaign for share;
-  if rec.id is null or rec.state->'launch'->>'id' is distinct from p_launch
-     or rec.state->'launch'->>'fingerprint' is distinct from p_fingerprint
-     or rec.state->'approval'->>'fingerprint' is distinct from p_fingerprint
-     or rec.state->>'status' not in ('launch_authorized')
-     or (rec.state->'launch'->>'expiresAt')::timestamptz <= now() then
+  if rec.id is null or not app_private.campaign_launch_current(p_campaign, p_launch, p_fingerprint) then
     raise exception 'stale authorization: plan, approval or launch authorization changed or expired' using errcode='40001';
   end if;
   -- Order is enforced here as well as in the worker: verify only after a recorded build, activate only after a
@@ -183,6 +195,11 @@ begin
   if s.operation_id is null or s.status <> 'claimed' or s.worker_id <> p_worker or s.attempt <> p_attempt or s.lease_expires_at <= now() then
     raise exception 'stale claim: this worker no longer holds the step' using errcode='40001';
   end if;
+  -- The pre-call gate also requires the authorization to still be current at this moment.
+  perform 1 from public.campaign_records where id = s.campaign_id for share;
+  if not app_private.campaign_launch_current(s.campaign_id, s.launch_id, s.plan_fingerprint) then
+    raise exception 'stale authorization: plan, approval or launch authorization changed or expired' using errcode='40001';
+  end if;
   insert into public.campaign_execution_log(operation_id,campaign_id,attempt,from_status,to_status,worker_id,evidence)
     values(s.operation_id,s.campaign_id,s.attempt,'claimed','claimed',p_worker,p_evidence);
 end $$;
@@ -194,10 +211,13 @@ end $$;
 create function app_private.campaign_execution_fence() returns trigger language plpgsql set search_path = '' as $$
 declare plan_change boolean; closing boolean;
 begin
+  closing := new.state->>'status' = 'closed' and old.state->>'status' is distinct from 'closed';
+  -- The whole launch authorization object (id, status, expiry, blockers) and the campaign status are fenced,
+  -- so no other command (e.g. attempt_launch) can rewrite them under an unresolved effect.
   plan_change := (old.state->'brief') is distinct from (new.state->'brief')
     or (old.state->'approval') is distinct from (new.state->'approval')
-    or (old.state->'launch'->>'id') is distinct from (new.state->'launch'->>'id');
-  closing := new.state->>'status' = 'closed' and old.state->>'status' is distinct from 'closed';
+    or (old.state->'launch') is distinct from (new.state->'launch')
+    or ((old.state->>'status') is distinct from (new.state->>'status') and not closing);
   if not (plan_change or closing) then return new; end if;
   if exists (select 1 from public.campaign_execution_steps where campaign_id = new.id and status in ('claimed','unknown')) then
     raise exception 'execution unresolved: a launch step is in flight or unknown; reconcile it before changing or closing the campaign' using errcode='40001';

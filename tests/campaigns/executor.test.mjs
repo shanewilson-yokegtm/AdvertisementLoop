@@ -317,3 +317,38 @@ test('memo or authorization changes are fenced while a step is in flight, unknow
   assert.equal((await env.api(creator, 'GET', [c.id])).state.revision, 4);
   await env.db.close();
 });
+
+test('expiry or asset revocation during the fresh readback stops activation', async () => {
+  const env = await setup();
+  // Authorization expires while the readback is in progress (worker clock).
+  const c = await env.authorized('slowexpiry');
+  let clock = Date.now();
+  const slow = fakePlatform({ verify: (ids, n) => { if (n === 2) clock = Date.parse(c.launch.expiresAt) + 1000; return { matches: true, previewRefs: ['p'], differences: [] }; } });
+  const [ex] = await run(env, c.id, slow, { now: () => new Date(clock) });
+  assert.equal(ex.status, 'blocked'); assert.equal(ex.step, 'activate'); assert.match(ex.detail, /expired/); assert.equal(slow.calls.activate, 0);
+  assert.equal((await env.db.query(`select status from campaign_execution_steps where operation_id='${ex.operationId}'`)).rows[0].status, 'blocked');
+  // Asset approval revoked while the readback is in progress.
+  const c2 = await env.authorized('revoke');
+  const revoke = fakePlatform({ verify: async (ids, n) => { if (n === 2) await env.db.exec(`update reviews set status='changes' where version_id='fixture-asset_v1'`); return { matches: true, previewRefs: ['p'], differences: [] }; } });
+  const [rv] = await run(env, c2.id, revoke);
+  assert.equal(rv.status, 'blocked'); assert.match(rv.detail, /approved, ready/); assert.equal(revoke.calls.activate, 0);
+  await env.db.exec(`update reviews set status='approved' where version_id='fixture-asset_v1'`);
+  // Database-level gate: the authorization expires (database clock) after the worker's own recheck.
+  const c3 = await env.authorized('dbexpiry');
+  // Worker clock says valid; the stored authorization is already expired in the database.
+  await env.db.exec(`set session_replication_role = replica; update campaign_records set state = jsonb_set(state, '{launch,expiresAt}', to_jsonb(to_char((now() + interval '3 seconds') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) where id='${c3.id}'; set session_replication_role = origin;`);
+  const p3 = fakePlatform({ verify: async (ids, n) => { if (n === 2) await new Promise(r => setTimeout(r, 3100)); return { matches: true, previewRefs: ['p'], differences: [] }; } });
+  const [db] = await run(env, c3.id, p3, { now: () => new Date(Date.now() - 60_000), stepTimeoutMs: 5000 });
+  assert.equal(db.status, 'blocked'); assert.match(db.detail, /Pre-call gate refused.*stale authorization/); assert.equal(p3.calls.activate, 0);
+  await env.db.close();
+});
+
+test('the fence covers the whole launch authorization, not only its id', async () => {
+  const env = await setup(); const c = await env.authorized('fullfence');
+  const p = fakePlatform({ build: async () => { throw new Error('reset'); } }); // leaves the build unknown
+  await run(env, c.id, p);
+  await assert.rejects(c.send(creator, 4, 'attempt', { type: 'attempt_launch' }), /unresolved/); // would rewrite launch.status
+  await assert.rejects(env.db.exec(`update campaign_records set state = jsonb_set(state, '{launch,expiresAt}', '"2099-01-01T00:00:00Z"') where id='${c.id}'`), /unresolved/);
+  await c.send(creator, 4, 'notes', { type: 'save_notes', notes: 'Waiting on reconciliation' }); // unrelated edits still work
+  await env.db.close();
+});

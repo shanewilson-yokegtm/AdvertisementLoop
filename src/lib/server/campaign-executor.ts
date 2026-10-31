@@ -98,7 +98,14 @@ async function runStep(o: Options, adapter: CampaignAdapter, state: CampaignStat
     try { check = await withTimeout(extras.beforeCall(), o.stepTimeoutMs ?? 30_000); }
     catch (e: any) { check = { proceed: false, evidence: { error: String(e.message).slice(0, 500) }, detail: `check failed: ${e.message}` }; }
     try { await rpc(o.db, 'campaign_step_evidence', { p_operation: op, p_worker: o.workerId, p_attempt: attempt, p_evidence: check.evidence }); }
-    catch (e: any) { throw new Stop({ status: 'needs_reconciliation', step, operationId: op, detail: `Lost the claim before the external call (none was made): ${e.message}` }); }
+    catch (e: any) {
+      // The database refused the pre-call gate (authorization changed/expired or claim lost). No call was made:
+      // record the step as blocked if we still hold it; otherwise leave it for reconciliation.
+      const reason = `Pre-call gate refused (no external call was made): ${e.message}`;
+      try { await rpc(o.db, 'campaign_step_complete', { p_operation: op, p_worker: o.workerId, p_attempt: attempt, p_outcome: 'blocked', p_receipt: { reason, ...check.evidence } }); }
+      catch { throw new Stop({ status: 'needs_reconciliation', step, operationId: op, detail: reason }); }
+      throw new Stop({ status: 'blocked', step, operationId: op, detail: reason });
+    }
     if (!check.proceed) {
       const reason = check.detail || 'pre-call check failed';
       try { await rpc(o.db, 'campaign_step_complete', { p_operation: op, p_worker: o.workerId, p_attempt: attempt, p_outcome: 'blocked', p_receipt: { reason, ...check.evidence } }); }
@@ -147,7 +154,12 @@ async function runChannel(o: Options, channel: Channel): Promise<ChannelOutcome>
     }, { preflight: preActivate, beforeCall: async () => {
       // The earlier readback can be stale: someone may have edited the paused entity since. Read it again now.
       const r = await adapter.verifyPaused(ids, activePlan);
-      return { proceed: r.matches, evidence: { preActivationReadback: r }, detail: r.matches ? undefined : `Paused build drifted from the approved plan: ${r.differences.join('; ')}` };
+      if (!r.matches) return { proceed: false, evidence: { preActivationReadback: r }, detail: `Paused build drifted from the approved plan: ${r.differences.join('; ')}` };
+      // The readback can be slow: recheck authorization, expiry, spending window and assets after it, right
+      // before the gate is recorded. The database repeats the authorization check when recording it.
+      try { await guard(o, channel, launchId); }
+      catch (e: any) { return { proceed: false, evidence: { preActivationReadback: r, recheck: String(e.message) }, detail: e.message }; }
+      return { proceed: true, evidence: { preActivationReadback: r, recheckedAt: (o.now ?? (() => new Date()))().toISOString() } };
     } });
     return { channel, status: 'active', step: 'activate', detail: 'Activated within the authorized plan' };
   } catch (e) {
