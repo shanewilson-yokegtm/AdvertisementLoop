@@ -1,3 +1,5 @@
+> Campaign operator work is on `feature/campaign-operator`. Read [the campaign handoff](docs/campaigns/CLAUDE-HANDOFF.md) for its current scope, checks and account-connection steps. The creative handoff below remains maintained independently.
+
 # Yoke Ad Studio handoff (updated Oct 30, 2026, morning PT)
 
 Paste this into a new chat to continue. Repo: `/home/claude/advertisementloop` (GitHub `shanewilson-yokegtm/AdvertisementLoop`, branch `main`, pushes auto-deploy to Vercel).
