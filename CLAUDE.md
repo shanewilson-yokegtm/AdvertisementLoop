@@ -1,6 +1,6 @@
 # Yoke campaign operator continuation
 
-Read `AGENTS.md`, then `docs/campaigns/CLAUDE-HANDOFF.md` before continuing this build.
+Read `AGENTS.md`, then `docs/campaigns/CLAUDE-HANDOFF.md` and `docs/campaigns/ACCOUNT-ACCESS.md` before continuing this build.
 
 The product starts with a conversation, produces an approved one-page campaign memo, launches consistently after “go”, reports observed settings/performance, and closes with a learning memo at the declared analysis date.
 
