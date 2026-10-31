@@ -12,23 +12,17 @@ Read-only discovery from a Claude session. Nothing below was changed in producti
 | Supabase advisor | `app_private.mcp_oauth_config` has RLS disabled. `anon`/`authenticated` have no SELECT on it and it holds only the public client id. | Low practical risk; fix recommended (below). |
 | Meta | Claude connector "Meta ads AI" is installed but `connect_incomplete`. No Meta tools available in the session. | Blocked: needs Shane to finish the connection. Ad account ID, Business Manager role, pixel/dataset and page identity unverified. |
 | LinkedIn | No LinkedIn Ads connector installed or found in the registry. | Blocked: needs a decision on access path (LinkedIn Marketing API app with server-held token, or browser-based execution). |
-| Waitlist outcome source | HubSpot portal "Yoke" (22312186, America/Vancouver, USD) is connected and has UTM properties (`utm_campaign___original/latest`, `hs_analytics_source`). No GTME waitlist property or form found. The only Webflow site visible is "HeyStack", not the Yoke site. | Unidentified: Shane needs to name the authoritative waitlist record (form/property/table). |
+| Waitlist outcome source | Limited search only: HubSpot portal "Yoke" (22312186, America/Vancouver, USD) is connected and has UTM properties (`utm_campaign___original/latest`, `hs_analytics_source`). A keyword search of contact properties did not surface a GTME waitlist property; forms, lists, other object types and other systems were not checked. The Webflow connector exposes only a "HeyStack" site. This does not show the source is absent. | Unidentified: Shane needs to name the authoritative waitlist record (form/property/table/system). |
 | Skill package | `npm run package:campaign-skill` reproduces the committed `skills/campaign-operator.zip` content exactly. | Ready. Installing it in the team Claude environment is Shane's action. |
 
 ## Gated changes (prepared, not applied)
 
-### 1. Apply the campaign migration
+### 1. Apply the campaign migrations
 - **Target:** Supabase `uevktzprbpymfcquotmb`.
-- **Change:** `apply_migration` with the contents of `supabase/migrations/20261030233954_campaign_operator.sql`, name `campaign_operator`. Then rename the local file to the version Supabase records.
+- **Change:** two `apply_migration` calls, in order: `supabase/migrations/20261030233954_campaign_operator.sql` (name `campaign_operator`), then `supabase/migrations/20261031001000_campaign_execution_ledger.sql` (name `campaign_execution_ledger`). Rename each local file to the version Supabase records. The ledger adds tables and server-only functions only; nothing calls them in the deployed app.
 - **Order:** apply before merging/deploying this branch to `main` (the app code expects the tables and `campaign_commit` RPC).
-- **Validate:** `list_tables` shows the four `campaign_*` tables with RLS on; `get_advisors` (security, performance) adds no new findings; `select has_table_privilege('anon','public.campaign_records','SELECT')` is false; `has_function_privilege('authenticated','public.campaign_commit(text,integer,uuid,text,text,text,jsonb,text,jsonb,jsonb,jsonb)','EXECUTE')` is false.
-- **Rollback (tables are empty until first use):**
-  ```sql
-  drop function if exists public.campaign_commit(text,integer,uuid,text,text,text,jsonb,text,jsonb,jsonb,jsonb);
-  drop table if exists public.campaign_metric_batches, public.campaign_observations, public.campaign_events, public.campaign_records cascade;
-  drop function if exists app_private.campaign_history_immutable();
-  delete from supabase_migrations.schema_migrations where name = 'campaign_operator';
-  ```
+- **Validate:** `list_tables` shows the four `campaign_*` tables plus `campaign_execution_steps` and `campaign_execution_log`, all with RLS on; `get_advisors` (security, performance) adds no new findings; `has_table_privilege('anon','public.campaign_records','SELECT')` is false; `has_function_privilege('authenticated', …)` is false for `campaign_commit`, `campaign_step_claim`, `campaign_step_complete` and `campaign_step_reconcile`.
+- **Rollback:** prefer a forward fix. While the new tables are still empty (`select count(*)` on each is 0), a reviewed follow-up migration can drop the new functions and tables (ledger objects first, then `campaign_*`). Once any campaign, event, import or ledger row exists, do not drop: those rows are the audit trail. Instead revert the app code (change 3) and leave the schema in place, or export the rows before any reviewed removal. Do not edit Supabase's recorded migration history by hand.
 
 ### 2. Enable RLS on `app_private.mcp_oauth_config`
 - **Important:** the access-token hook in `20261030160941_mcp_oauth_guard.sql` reads this table as `supabase_auth_admin` (granted SELECT). Enabling RLS without a policy would block that read and break connector sign-in. Apply both statements together:
@@ -48,4 +42,4 @@ Read-only discovery from a Claude session. Nothing below was changed in producti
 - Finish the "Meta ads AI" connector, or decide on a server-held Meta System User token in Vercel secrets. Then read-only: ad account ID, currency/timezone, business role, page, pixel/dataset and waitlist event eligibility.
 - Choose the LinkedIn path and grant read-only Campaign Manager access first.
 - Name the authoritative waitlist outcome source.
-- Live adapters stay unregistered until handoff step 7 (durable step ledger, paused build, readback) is built and reviewed.
+- The durable step ledger and executor rehearsal are on this branch (see `EXECUTION-LEDGER.md`). Live adapters stay unregistered until a real adapter is implemented against them, reviewed and tested against paused builds in the firm accounts.

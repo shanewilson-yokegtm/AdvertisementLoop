@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError, dbError, type Actor } from './api';
+import { assertAssetsReady } from './campaign-assets';
 import { PLAYBOOK_VERSION, commandSchema, type CampaignState } from '../campaigns/contracts';
 import { applyCommand, CampaignError, requireRole } from '../campaigns/workflow';
 import { auditPlan, report, closeout, type StoredBatch } from '../campaigns/reporting';
@@ -69,13 +70,7 @@ async function route(db: SupabaseClient, actor: Actor, method: string, path: str
     }
     if (input.expectedRevision !== state.revision) throw new ApiError(409,'conflict','Campaign changed; reload before saving');
     if (input.command.type === 'approve' || input.command.type === 'authorize_launch') {
-      for (const p of state.brief?.channels || []) for (const c of p.creatives) {
-        const version: any = unwrap(await db.from('versions').select('id,asset_id,file_path,render,qa,width,height').eq('id',c.versionId).maybeSingle());
-        const review: any = unwrap(await db.from('reviews').select('status').eq('version_id',c.versionId).maybeSingle());
-        if (!version || version.asset_id !== c.assetId || !version.file_path || version.render?.state !== 'ready' || review?.status !== 'approved'
-          || version.qa?.some((q: any) => q.status === 'fail') || version.width !== c.width || version.height !== c.height)
-          throw new ApiError(409,'asset_not_ready',`Creative ${c.versionId} must be an approved, ready Ad Studio version with the declared dimensions`);
-      }
+      await assertAssetsReady(db, state);
     }
     const next = applyCommand(state, input.command, actor);
     const cmd = input.command;
