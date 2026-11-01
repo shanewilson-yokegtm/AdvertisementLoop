@@ -1,10 +1,16 @@
 # Yoke Ad Studio (AdvertisementLoop)
 
-A simple ad builder for the Yoke team. One loop, nothing else:
+## Campaign operator scaffold
+
+The campaign workflow adds conversation → approved memo → authorized execution → shared reporting → dated learning review. Start with [the Claude handoff](docs/campaigns/CLAUDE-HANDOFF.md) and [campaign skill](skills/campaign-operator/SKILL.md). `/campaigns` provides memo, execution, audit, performance and closeout views. Both platform adapters and scheduled work are unconnected; the schema migration is unapplied.
+
+Run `npm run test:campaigns`, `npm run typecheck` and `npm run build`. Package the installable skill with `npm run package:campaign-skill`.
+
+A shared creative workspace for the Yoke team. The existing creative loop:
 
 **idea → branded static or video ad → shared Library → share for feedback → next version**
 
-Two screens: **Library** and **Create an ad**. A corner button sends bugs and suggestions.
+**Library** and **Create an ad** support the creative loop. The campaign scaffold adds **Campaigns**. A corner button sends bugs and suggestions.
 
 ## Stack
 

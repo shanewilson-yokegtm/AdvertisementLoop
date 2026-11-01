@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError, handle, type Actor } from './api';
+import { registerCampaignTools, CAMPAIGN_TOOL_NAMES } from '../campaigns/mcp';
 
 type Call = (method: 'GET' | 'POST', parts: string[], body?: any, query?: Record<string, string>) => Promise<any>;
 
@@ -21,15 +22,17 @@ const READ = { readOnlyHint: true, destructiveHint: false, openWorldHint: false 
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
 export const TOOL_NAMES = ['whoami', 'brand_pack', 'list_ads', 'get_ad', 'feedback_inbox', 'create_ad', 'request_upload_urls', 'save_version', 'save_pending_version',
-  'add_feedback', 'decide_feedback', 'regenerate_ad', 'start_revision', 'get_revision', 'complete_revision', 'fail_revision', 'revert_ad', 'list_slack_channels', 'post_to_slack', 'higgsfield_usage', 'higgsfield_generate', 'higgsfield_regenerate', 'higgsfield_status'] as const;
+  'add_feedback', 'decide_feedback', 'regenerate_ad', 'start_revision', 'get_revision', 'complete_revision', 'fail_revision', 'revert_ad', 'list_slack_channels', 'post_to_slack', 'higgsfield_usage', 'higgsfield_generate', 'higgsfield_regenerate', 'higgsfield_status', ...CAMPAIGN_TOOL_NAMES] as const;
 
 export function buildMcpServer(db: SupabaseClient, actor: Actor, appUrl: string, call: Call = (m, p, b, q) => handle(db, actor, m, p, b ?? null, new URLSearchParams(q || {}), appUrl)) {
   const s = new McpServer({ name: 'yoke-ad-studio', version: '1.0.0' }, {
     instructions: 'Yoke Ad Studio is the team\'s shared ad library. You act as the signed-in member with their permissions. ' +
       'Read brand_pack before writing copy. Owners (and Shane as admin) change their own ads; everyone can read and comment. ' +
       'Saving is not approval; final approval happens in the app. Never invent ids or links: report only what tools return. ' +
-      'higgsfield_generate costs money and post_to_slack posts publicly: ask the person first, every time.',
+      'higgsfield_generate costs money and post_to_slack posts publicly: ask the person first, every time. ' +
+      'Campaign tools share the campaign memo and revision across teammates. Campaign approval and launch authorization are separate; firm execution adapters are not connected.',
   });
+  registerCampaignTools(s, db, actor);
   const reg = (name: string, cfg: { title: string; description: string; inputSchema?: z.ZodRawShape; annotations: Record<string, boolean> }, cb: (args: any) => Promise<unknown>) =>
     s.registerTool(name, { title: cfg.title, description: cfg.description, inputSchema: cfg.inputSchema ?? {}, annotations: { title: cfg.title, ...cfg.annotations } }, (args: any) => run(() => cb(args)));
 

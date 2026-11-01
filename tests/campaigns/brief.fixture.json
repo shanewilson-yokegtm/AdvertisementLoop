@@ -1,0 +1,82 @@
+{
+  "title": "Example GTME waitlist campaign",
+  "purpose": "Exercise the campaign workflow locally.",
+  "hypothesis": "A practitioner workflow demonstration can attract qualified builders.",
+  "offer": "Illustrative waitlist offer; not approved for publication.",
+  "qualification": "Personally builds GTM workflows; classify in-house and agency separately.",
+  "primaryOutcome": "qualified_waitlist_signup",
+  "target": 10,
+  "successRule": "Review unique qualified signups, qualification share and cost; insufficient evidence remains inconclusive.",
+  "currency": "USD",
+  "timezone": "America/Los_Angeles",
+  "startsAt": "2026-11-02T09:00:00-08:00",
+  "spendEndsAt": "2026-11-16T09:00:00-08:00",
+  "analyzeAfter": "2026-11-20T09:00:00-08:00",
+  "totalCeiling": 140,
+  "channels": [
+    {
+      "channel": "meta",
+      "accountId": "fixture-account",
+      "identityId": "fixture-page",
+      "objective": "website_leads",
+      "conversionEvent": "waitlist_signup",
+      "attribution": "7d_click_no_view",
+      "audience": {
+        "id": "gtme_builders",
+        "name": "GTME practitioners",
+        "version": 1,
+        "definition": "People who personally build or maintain GTM workflows.",
+        "countries": [
+          "US"
+        ],
+        "include": [
+          "Current GTM engineering and equivalent technical practitioner roles"
+        ],
+        "exclude": [
+          "Staff",
+          "Existing waitlist members"
+        ],
+        "expansion": "off",
+        "sourceListRef": null,
+        "estimatedSize": null,
+        "matchedSize": null,
+        "checkedAt": null
+      },
+      "placements": [
+        "feed"
+      ],
+      "budget": {
+        "amount": 10,
+        "type": "daily",
+        "ceiling": 140,
+        "bidStrategy": "highest_volume"
+      },
+      "destination": "https://example.test/gtme",
+      "creatives": [
+        {
+          "conceptId": "workflow_relief",
+          "conceptName": "Workflow relief",
+          "assetId": "fixture-asset",
+          "versionId": "fixture-asset_v1",
+          "primaryText": "Illustrative campaign copy for local tests.",
+          "headline": "Example workflow",
+          "cta": "Join waitlist",
+          "width": 1080,
+          "height": 1080,
+          "placements": [
+            "feed"
+          ],
+          "adaptationNotes": "Use the approved square export; verify preview before launch."
+        }
+      ]
+    }
+  ],
+  "experiments": [],
+  "heldConstant": [
+    "Offer",
+    "Qualification rule"
+  ],
+  "limitations": [
+    "Local test fixture; no live account or campaign."
+  ]
+}

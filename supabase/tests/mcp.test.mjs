@@ -19,7 +19,7 @@ function load(file) {
   if (cache[file]) return cache[file];
   const code = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const m = { exports: {} }; cache[file] = m.exports;
-  new Function('require', 'module', 'exports', code)(id => id === './api' ? load('src/lib/server/api.ts') : id === './slack' ? load('src/lib/server/slack.ts') : id === './higgsfield' ? load('src/lib/server/higgsfield.ts') : require(id), m, m.exports);
+  new Function('require', 'module', 'exports', code)(id => id.startsWith('.') ? load(path.relative(root, path.resolve(root, path.dirname(file), id + (path.extname(id) ? '' : '.ts')))) : require(id), m, m.exports);
   return Object.assign(cache[file], m.exports);
 }
 const auth = load('src/lib/server/mcp-auth.ts');
