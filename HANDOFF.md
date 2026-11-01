@@ -1,4 +1,4 @@
-> Campaign operator work is on `feature/campaign-operator`. Read [the campaign handoff](docs/campaigns/CLAUDE-HANDOFF.md) for its current scope, checks and account-connection steps. The creative handoff below remains maintained independently.
+> Campaign operator released to production Nov 1, 2026 (PR #3, merge `fb8809a`; migrations `20261101152428_campaign_operator`, `20261101152517_campaign_execution_ledger`). Read [the campaign handoff](docs/campaigns/CLAUDE-HANDOFF.md) and [release record](docs/campaigns/ACCOUNT-ACCESS.md). The creative handoff below remains maintained independently.
 
 # Yoke Ad Studio handoff (updated Oct 30, 2026, morning PT)
 
