@@ -2,23 +2,45 @@
 import { useState } from 'react';
 import type { CampaignState } from '@/lib/campaigns/contracts';
 
-type Props = { state: CampaignState; memo: string | null; fingerprint: string; canApprove: boolean;
-  pending: boolean; onCommand: (command: Record<string, unknown>) => void; audit: any; performance: any; closeout: any;
+type Props = { state: CampaignState; memo: string | null; fingerprint: string; canApprove: boolean; canEdit?: boolean;
+  pending: boolean; onCommand: (command: Record<string, unknown>, expectedRevision?: number) => Promise<boolean> | void; audit: any; performance: any; closeout: any;
   groupBy: string; onGroupBy: (s: string) => void; from: string; to: string; onFrom: (s: string) => void; onTo: (s: string) => void };
 const pretty = (s: string) => s.replaceAll('_',' ');
 const value = (v: number | null | undefined) => v == null ? 'Unavailable' : new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(v);
 export default function CampaignView(p: Props) {
   const [view, setView] = useState('Memo'); const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false); const [notes, setNotes] = useState('');
+  const [notesRevision, setNotesRevision] = useState(0); const [saved, setSaved] = useState(false);
   const s = p.state;
+  const notesChangedElsewhere = editing && notesRevision !== s.revision;
+  const beginEditing = () => { setNotes(s.planningNotes); setNotesRevision(s.revision); setEditing(true); setSaved(false); };
   return <section>
     <div className="head"><div><h1>{s.title}</h1><p className="muted">Revision {s.revision} · {s.playbookVersion} · <span className="chip">{pretty(s.status)}</span></p></div>
       <button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(`Use the Yoke campaign-operator skill to continue campaign ${s.id}. Read the shared record first. Help me reach an approved one-page campaign memo.`); setCopied(true); } catch { setCopied(false); window.alert(`Continue campaign ${s.id} with the campaign-operator skill in Claude.`); } }}>{copied ? 'Prompt copied' : 'Continue in Claude'}</button>
     </div>
     <nav className="tabs" aria-label="Campaign views">{['Memo','Execution','Audit','Performance','Closeout'].map(t => <button key={t} aria-pressed={view === t} onClick={() => setView(t)}>{t}</button>)}</nav>
     {view === 'Memo' ? <>
-      <p>The planning conversation happens in Claude. Everyone works from this saved memo and revision.</p>
-      {p.memo ? <div className="campaign-memo">{p.memo.split('\n').filter(Boolean).map((line,i) => <p key={i}>{line.replace(/^#+\s*/, '').replaceAll('**','')}</p>)}</div> : <p>No complete memo yet. Continue in Claude to agree the audience, offer, concepts, budget and measurement.</p>}
-      {s.planningNotes ? <details className="campaign-memo"><summary>Planning notes and open decisions</summary><p style={{whiteSpace:'pre-wrap'}}>{s.planningNotes}</p></details> : null}
+      <p>Everyone works from this saved memo and revision. Continue planning here or in Claude.</p>
+      {p.memo ? <div className="campaign-memo">{p.memo.split('\n').filter(Boolean).map((line,i) => <p key={i}>{line.replace(/^#+\s*/, '').replaceAll('**','')}</p>)}</div> : <p>No complete memo yet. Save the current decisions and asset links in planning notes while audience, budget, timing or measurement remain open.</p>}
+      <section className="campaign-memo" aria-label="Campaign planning notes">
+        <h2>Planning notes and asset selections</h2>
+        <p className="muted">Working draft for team review. Saving notes does not approve a memo or authorize launch.</p>
+        {s.planningNotes ? <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{s.planningNotes.split(/(https:\/\/[^\s<>]+)/g).map((part,i) => part.startsWith('https://') ? <a key={i} href={part} target="_blank" rel="noreferrer">{part}</a> : part)}</p> : <p>No planning notes saved yet.</p>}
+        {p.canEdit && s.status !== 'closed' ? editing ? <form onSubmit={async e => {
+          e.preventDefault();
+          if (p.pending || notesChangedElsewhere || notes.length > 12000) return;
+          setSaved(false);
+          if (await p.onCommand({type:'save_notes',notes},notesRevision)) { setEditing(false); setSaved(true); }
+        }}>
+          <label htmlFor="campaign-planning-notes">Draft notes and exact-version asset URLs</label>
+          <textarea id="campaign-planning-notes" rows={16} maxLength={12000} value={notes} disabled={p.pending} onChange={e => setNotes(e.target.value)} aria-describedby="campaign-notes-help" />
+          <p id="campaign-notes-help" className="muted">{notes.length.toLocaleString()} / 12,000 characters · Editing revision {notesRevision}. Keep unresolved settings marked pending.</p>
+          {notesChangedElsewhere ? <p role="alert">The shared campaign changed. Your draft is preserved below; compare it with the saved notes above before cancelling and editing the latest revision.</p> : null}
+          <div className="row"><button className="btn primary" type="submit" disabled={p.pending || notesChangedElsewhere || notes.length > 12000 || notes === s.planningNotes}>{p.pending ? 'Saving…' : 'Save planning notes'}</button>
+            <button className="btn" type="button" disabled={p.pending} onClick={() => setEditing(false)}>Cancel editing</button></div>
+        </form> : <button className="btn" disabled={p.pending} onClick={beginEditing}>{s.planningNotes ? 'Edit planning notes' : 'Add planning notes'}</button> : null}
+        {saved ? <p role="status">Planning notes saved.</p> : null}
+      </section>
       {p.canApprove && s.brief && s.status !== 'closed' ? <button className="btn primary" disabled={p.pending || !!s.approval} onClick={() => p.onCommand({ type: 'approve', fingerprint: p.fingerprint })}>{s.approval ? 'Memo approved' : 'Approve this memo'}</button> : null}
       {s.approval ? <p className="muted">Approved {new Date(s.approval.at).toLocaleString()}. Launch authorization is recorded separately when you say go.</p> : null}
     </> : null}
