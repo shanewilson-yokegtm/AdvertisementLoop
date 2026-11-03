@@ -38,7 +38,7 @@ export function Trend({ data, result, money }: { data: PerformanceData; result: 
         <path d={line} fill="none" className="perf-event-line" />
         {series.length === 1 ? <circle cx={x(0)} cy={y(series[0].results,maxResults)} r="4" className="perf-event-dot" /> : null}
         {hover != null ? <><line x1={x(hover)} x2={x(hover)} y1={top} y2={h-bottom} className="perf-crosshair" /><circle cx={x(hover)} cy={y(series[hover].results,maxResults)} r="4" className="perf-event-dot" /></> : null}
-        {series.map((d,i) => <rect key={`hit${d.date}`} x={left+i*(w-left-right)/series.length} y="0" width={(w-left-right)/series.length} height={h} fill="transparent" onMouseEnter={() => setHover(i)}><title>{d.date}: {money(d.spend)}; {d.results} events</title></rect>)}
+        {series.map((d,i) => <rect key={`hit${d.date}`} x={left+i*(w-left-right)/series.length} y="0" width={(w-left-right)/series.length} height={h} fill="transparent" onMouseEnter={() => setHover(i)}><title>{`${d.date}: ${money(d.spend)}; ${d.results} events`}</title></rect>)}
       </svg><div className="perf-chart-dates"><span>{shortDate(data.range.from)}</span><span>{shortDate(data.range.to)}</span></div>
     </div>
     <details className="perf-daily"><summary>View daily data</summary><div className="perf-table-wrap"><table><thead><tr><th>Date</th><th>Spend</th><th>{RESULT_LABELS[result]}</th><th>Link clicks</th><th>Impressions</th></tr></thead><tbody>{series.map(d=><tr key={d.date}><th>{d.date}</th><td>{money(d.spend)}</td><td>{integer(d.results)}</td><td>{integer(d.clicks)}</td><td>{integer(d.impressions)}</td></tr>)}</tbody></table></div></details>
