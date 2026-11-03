@@ -7,7 +7,7 @@ import ts from 'typescript';
 
 const root=path.resolve(import.meta.dirname,'../..'),require=createRequire(import.meta.url),cache=new Map();
 function load(file){file=path.resolve(root,file);if(cache.has(file))return cache.get(file).exports;const m={exports:{}};cache.set(file,m);new Function('require','module','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{if(!id.startsWith('.'))return require(id);const target=path.resolve(path.dirname(file),id);return load(existsSync(target+'.ts')?target+'.ts':target);},m,m.exports);return m.exports;}
-const model=load('src/lib/performance/model.ts');const {graphReader,loadMetaPerformance}=load('src/lib/server/meta-reporting.ts');
+const model=load('src/lib/performance/model.ts');const {graphReader,loadMetaPerformance,enrichCreativeImages}=load('src/lib/server/meta-reporting.ts');
 const config={token:'secret-never-in-url',accountId:'123',version:'v26.0'};
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json'}});
 const period={from:'2026-09-01',to:'2026-09-02'};
@@ -44,6 +44,16 @@ test('CSV escapes formulas including whitespace-prefixed payloads and quotes',()
 });
 test('ad-set and concept inventory is inspectable without delivery, with current ads attached',()=>{
  const d=fixture();d.adsets=[{id:'10',name:'One',campaign_id:'20'},{id:'11',name:'No delivery',campaign_id:'20'}];d.ads.push({id:'3',name:'YOKE | New concept | v1',campaign_id:'20',adset_id:'11',effective_status:'PAUSED'});const sets=model.groups(d,'adset','view_content');assert.equal(sets.length,2);assert.equal(sets.find(s=>s.id==='11').metrics.spend,0);assert.deepEqual(sets.find(s=>s.id==='11').adIds,['3']);assert.ok(model.groups(d,'concept','view_content').some(c=>c.id==='New concept'));assert.equal(model.groups(d,'campaign','view_content').find(c=>c.id==='20').adIds.length,3);
+});
+test('placement creatives resolve declared hashes to full-resolution account assets and copy',async()=>{
+ const ads=[{id:'1',creative:{id:'c',thumbnail_url:'https://scontent.xx.fbcdn.net/tiny',asset_feed_spec:{images:[{hash:'a'},{hash:'b'},{hash:'a'}],bodies:[{text:'Actual copy'}],titles:[{text:'Actual headline'}],link_urls:[{website_url:'https://example.com/waitlist'}]}}}];let calls=0;
+ await enrichCreativeImages(ads,'act_123',{pages:async(path,q)=>{calls++;assert.equal(path,'act_123/adimages');assert.deepEqual(JSON.parse(q.hashes),['a','b']);return[{hash:'a',url:'https://scontent.xx.fbcdn.net/full',width:1080,height:1080},{hash:'b',url:'https://evil.test/not-meta',width:1080,height:1920}];}});
+ assert.equal(calls,1);assert.equal(ads[0].creative.image_url,'https://scontent.xx.fbcdn.net/full');assert.equal(ads[0].creative.images.length,1);assert.equal(ads[0].creative.body,'Actual copy');assert.equal(model.destination(ads[0]),'https://example.com/waitlist');
+});
+test('image lookups batch unique hashes and preserve existing static image URLs',async()=>{
+ const ads=[{id:'1',creative:{id:'c',image_url:'https://scontent.xx.fbcdn.net/existing',asset_feed_spec:{images:Array.from({length:151},(_,n)=>({hash:String(n)}))}}}];let batches=0,maxBatch=0;
+ await enrichCreativeImages(ads,'act_123',{pages:async(path,q)=>{batches++;const hashes=JSON.parse(q.hashes);maxBatch=Math.max(maxBatch,hashes.length);return hashes.map(hash=>({hash,url:'https://scontent.xx.fbcdn.net/'+hash,width:1080,height:1080}));}});
+ assert.equal(batches,3);assert.equal(maxBatch,75);assert.equal(ads[0].creative.images.length,151);assert.equal(ads[0].creative.image_url,'https://scontent.xx.fbcdn.net/existing');
 });
 test('pagination stays on the same account/query with header auth; ignores malicious next URLs',async()=>{
  const calls=[];const reader=graphReader(config,async(u,o)=>{calls.push({url:new URL(u),options:o});return calls.length===1?json({data:[1],paging:{next:'https://evil.test/?access_token=leak',cursors:{after:'cursor2'}}}):json({data:[2]});});assert.deepEqual(await reader.pages('act_123/ads',{fields:'id'}),[1,2]);assert.equal(calls[1].url.hostname,'graph.facebook.com');assert.equal(calls[1].url.searchParams.get('after'),'cursor2');assert.equal(calls[1].url.searchParams.get('fields'),'id');for(const c of calls){assert.equal(c.options.method,'GET');assert.equal(c.options.headers.Authorization,'Bearer secret-never-in-url');assert.ok(!c.url.href.includes(config.token));assert.equal(c.options.cache,'no-store');}
