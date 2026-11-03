@@ -1,5 +1,9 @@
 # Yoke Ad Studio (AdvertisementLoop)
 
+## Account performance
+
+**Performance** (`/performance`) is the integrated Meta account dashboard: flexible dates, previous-period comparisons, daily trends, publisher platforms, campaigns, ad sets, provisional concepts, creative previews and observed settings. It reads one server-configured account using `ads_read`; it cannot change ads. Existing member sign-in is required. See [reporting setup and measurement contract](docs/PERFORMANCE.md). Run `npm run test:performance` for reporting and access checks.
+
 ## Campaign operator scaffold
 
 The campaign workflow adds conversation → approved memo → authorized execution → shared reporting → dated learning review. Start with [the Claude handoff](docs/campaigns/CLAUDE-HANDOFF.md) and [campaign skill](skills/campaign-operator/SKILL.md). `/campaigns` provides memo, execution, audit, performance and closeout views. Both platform adapters and scheduled work are unconnected; the schema migration is unapplied.
