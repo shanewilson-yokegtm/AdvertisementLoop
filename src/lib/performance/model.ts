@@ -11,7 +11,8 @@ export type Actions = { action_type: string; value: string }[];
 export type Insight = { ad_id?: string; ad_name?: string; adset_id?: string; adset_name?: string; campaign_id?: string; campaign_name?: string; date_start: string; date_stop: string; spend?: string; impressions?: string; reach?: string; inline_link_clicks?: string; actions?: Actions; publisher_platform?: string };
 export type Campaign = { id: string; name: string; status?: string; effective_status?: string; objective?: string; daily_budget?: string; lifetime_budget?: string; start_time?: string; stop_time?: string };
 export type AdSet = { id: string; name: string; campaign_id: string; effective_status?: string; daily_budget?: string; lifetime_budget?: string; optimization_goal?: string; billing_event?: string; start_time?: string; end_time?: string; attribution_spec?: { event_type: string; window_days: number }[]; targeting?: Record<string, unknown>; promoted_object?: Record<string, unknown> };
-export type Creative = { id: string; thumbnail_url?: string; image_url?: string; image_hash?: string; video_id?: string; body?: string; title?: string; url_tags?: string; object_story_spec?: { link_data?: { link?: string; message?: string; name?: string; picture?: string }; video_data?: { message?: string; title?: string } } };
+export type CreativeImage = { hash: string; url: string; width?: number; height?: number };
+export type Creative = { id: string; thumbnail_url?: string; image_url?: string; image_hash?: string; video_id?: string; body?: string; title?: string; url_tags?: string; images?: CreativeImage[]; asset_feed_spec?: { images?: { hash?: string; url?: string }[]; bodies?: { text?: string }[]; titles?: { text?: string }[]; link_urls?: { website_url?: string }[]; videos?: { video_id?: string }[] }; object_story_spec?: { link_data?: { link?: string; message?: string; name?: string; picture?: string }; video_data?: { message?: string; title?: string } } };
 export type Ad = { id: string; name: string; campaign_id: string; adset_id: string; effective_status?: string; creative?: Creative };
 export type Metrics = { spend: number; impressions: number; clicks: number; results: number; reach: number | null };
 export type Period = { from: string; to: string };
@@ -62,7 +63,7 @@ export function dailySeries(data: PerformanceData, key: ResultKey) {
 export function safeMediaUrl(value?: string): string | undefined {
   if (!value) return; try { const u = new URL(value); if (u.protocol === 'https:' && (u.hostname.endsWith('.fbcdn.net') || u.hostname.endsWith('.cdninstagram.com') || u.hostname === 'scontent.xx.fbcdn.net' || u.hostname === 'www.facebook.com')) return value; } catch { /* no untrusted schemes */ }
 }
-export function destination(ad: Ad) { const raw = ad.creative?.object_story_spec?.link_data?.link; if (!raw) return null; try { const u = new URL(raw); return ['https:', 'http:'].includes(u.protocol) ? u.href : null; } catch { return null; } }
+export function destination(ad: Ad) { const raw = ad.creative?.object_story_spec?.link_data?.link || ad.creative?.asset_feed_spec?.link_urls?.[0]?.website_url; if (!raw) return null; try { const u = new URL(raw); return ['https:', 'http:'].includes(u.protocol) ? u.href : null; } catch { return null; } }
 export function csvCell(value: unknown) { let s = String(value ?? ''); if (/^\s*[=+@-]|^[\t\r\n]/.test(s)) s = `'${s}`; return `"${s.replaceAll('"', '""')}"`; }
 export type GroupRow = { id: string; name: string; metrics: Metrics; adIds: string[]; status: string; thumbnail?: string; concept: string | null; campaignIds: string[]; creativeId?: string };
 export function groups(data: PerformanceData, by: 'campaign' | 'adset' | 'concept' | 'creative', key: ResultKey): GroupRow[] {
