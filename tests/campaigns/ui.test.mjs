@@ -38,6 +38,38 @@ test('campaign screen preserves permission gates, data states, filters and exact
   }finally{await act(async()=>root.unmount());dom.window.close();globalThis.window=before.window;globalThis.document=before.document;delete globalThis.IS_REACT_ACT_ENVIRONMENT;}
 });
 
+test('planning notes keep exact asset links, preserve failed/conflicting edits, and gate editing by role and status',async()=>{
+  const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost'});
+  const before={window:globalThis.window,document:globalThis.document};
+  globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+  const el=document.getElementById('root');const root=createRoot(el);const commands=[];
+  const assetUrl='https://advertisementloop-eight.vercel.app/a/fixture_asset?v=fixture_asset_v2';
+  const state={...props.state,brief:null,planningNotes:`Scope pending.\n${assetUrl}`};
+  let succeeds=false;
+  const render=async(over={})=>act(async()=>root.render(React.createElement(CampaignView,{...props,state,memo:null,canEdit:true,
+    onCommand:async(c,revision)=>{commands.push({c,revision});return succeeds;},...over})));
+  const click=async(label)=>{const button=[...el.querySelectorAll('button')].find(b=>b.textContent===label);assert.ok(button,label);await act(async()=>button.click());};
+  try{
+    await render();assert.equal(el.querySelector(`a[href="${assetUrl}"]`).getAttribute('href'),assetUrl);
+    await click('Edit planning notes');assert.equal(el.querySelector('textarea').value,state.planningNotes);assert.equal(el.querySelector('textarea').maxLength,12000);
+    if(process.env.CAMPAIGN_NOTES_PREVIEW_HTML) writeFileSync(process.env.CAMPAIGN_NOTES_PREVIEW_HTML,'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Campaign notes · local fixture</title><style>'+readFileSync(path.join(rootDir,'src/app/globals.css'),'utf8')+'</style><body><main class="wrap"><p class="muted">LOCAL DESIGN FIXTURE · No live account data</p>'+el.innerHTML+'</main></body></html>');
+    // A stale revision after Reload must keep the local draft and block overwrite.
+    await render({state:{...state,revision:3,planningNotes:'Another teammate saved this.'}});
+    assert.equal(el.querySelector('textarea').value,state.planningNotes);assert.match(el.textContent,/Your draft is preserved/);
+    assert.equal([...el.querySelectorAll('button')].find(b=>b.textContent==='Save planning notes').disabled,true);
+    await click('Cancel editing');await render();await click('Edit planning notes');assert.equal(el.querySelector('textarea').value,state.planningNotes);
+    // Submit directly to exercise the save receipt without depending on jsdom's text-input emulation.
+    await act(async()=>el.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+    assert.deepEqual(commands.at(-1),{c:{type:'save_notes',notes:state.planningNotes},revision:2});
+    assert.ok(el.querySelector('textarea'));assert.doesNotMatch(el.textContent,/Planning notes saved\./);
+    succeeds=true;
+    await act(async()=>el.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+    assert.equal(el.querySelector('textarea'),null);assert.match(el.textContent,/Planning notes saved\./);
+    await render({canEdit:false});assert.equal([...el.querySelectorAll('button')].some(b=>b.textContent==='Edit planning notes'),false);
+    await render({state:{...state,status:'closed'}});assert.equal([...el.querySelectorAll('button')].some(b=>b.textContent==='Edit planning notes'),false);
+  }finally{await act(async()=>root.unmount());dom.window.close();globalThis.window=before.window;globalThis.document=before.document;delete globalThis.IS_REACT_ACT_ENVIRONMENT;}
+});
+
 // Optional local visual review: no public demo route, credentials or production rows.
 if(process.env.CAMPAIGN_PREVIEW_HTML){
   writeFileSync(process.env.CAMPAIGN_PREVIEW_HTML,'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Campaign screen · local fixture</title><style>'+readFileSync(path.join(rootDir,'src/app/globals.css'),'utf8')+'</style><body><main class="wrap"><p class="muted">LOCAL DESIGN FIXTURE · No live account data</p>'+renderToStaticMarkup(React.createElement(CampaignView,props))+'</main></body></html>');
