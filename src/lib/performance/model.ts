@@ -63,6 +63,7 @@ export function safeMediaUrl(value?: string): string | undefined {
   if (!value) return; try { const u = new URL(value); if (u.protocol === 'https:' && (u.hostname.endsWith('.fbcdn.net') || u.hostname.endsWith('.cdninstagram.com') || u.hostname === 'scontent.xx.fbcdn.net' || u.hostname === 'www.facebook.com')) return value; } catch { /* no untrusted schemes */ }
 }
 export function destination(ad: Ad) { const raw = ad.creative?.object_story_spec?.link_data?.link; if (!raw) return null; try { const u = new URL(raw); return ['https:', 'http:'].includes(u.protocol) ? u.href : null; } catch { return null; } }
+export function csvCell(value: unknown) { let s = String(value ?? ''); if (/^\s*[=+@-]|^[\t\r\n]/.test(s)) s = `'${s}`; return `"${s.replaceAll('"', '""')}"`; }
 export type GroupRow = { id: string; name: string; metrics: Metrics; adIds: string[]; status: string; thumbnail?: string; concept: string | null; campaignIds: string[]; creativeId?: string };
 export function groups(data: PerformanceData, by: 'campaign' | 'adset' | 'concept' | 'creative', key: ResultKey): GroupRow[] {
   const adMap = new Map(data.ads.map(a => [a.id, a])); const rows = new Map<string, GroupRow>();
@@ -78,6 +79,14 @@ export function groups(data: PerformanceData, by: 'campaign' | 'adset' | 'concep
     if (row.campaign_id && !item.campaignIds.includes(row.campaign_id)) item.campaignIds.push(row.campaign_id);
   }
   if (by === 'campaign') for (const c of data.campaigns.filter(c => !data.campaignId || c.id === data.campaignId)) if (!rows.has(c.id)) rows.set(c.id, { id: c.id, name: c.name, metrics: metrics([], key), adIds: [], status: c.effective_status || 'UNKNOWN', concept: null, campaignIds: [c.id] });
+  if (by === 'adset') for (const s of data.adsets.filter(s => !data.campaignId || s.campaign_id === data.campaignId)) if (!rows.has(s.id)) rows.set(s.id, { id: s.id, name: s.name, metrics: metrics([], key), adIds: [], status: s.effective_status || 'UNKNOWN', concept: null, campaignIds: [s.campaign_id] });
+  for (const ad of data.ads.filter(a => !data.campaignId || a.campaign_id === data.campaignId)) {
+    const concept = conceptOf(ad.name); const id = by === 'campaign' ? ad.campaign_id : by === 'adset' ? ad.adset_id : by === 'concept' ? concept || '__unclassified' : '';
+    if (by === 'concept' && !rows.has(id)) rows.set(id, { id, name: concept || 'Unclassified', metrics: metrics([], key), adIds: [], status: ad.effective_status || 'UNKNOWN', concept, campaignIds: [] });
+    const item = rows.get(id); if (!item) continue;
+    if (!item.adIds.includes(ad.id)) item.adIds.push(ad.id);
+    if (!item.campaignIds.includes(ad.campaign_id)) item.campaignIds.push(ad.campaign_id);
+  }
   // Inventory stays inspectable even when it had no delivery in this period.
   if (by === 'creative') for (const ad of data.ads.filter(a => !data.campaignId || a.campaign_id === data.campaignId)) {
     const id = ad.creative?.id || ad.id;

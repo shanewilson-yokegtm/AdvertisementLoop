@@ -39,6 +39,12 @@ test('daily zero fill occurs only within successful queried range',()=>{
 test('preview and destination URLs reject unsafe schemes and misleading hosts',()=>{
  for(const u of ['javascript:alert(1)','https://fbcdn.net.evil.test/a','http://scontent.xx.fbcdn.net/a'])assert.equal(model.safeMediaUrl(u),undefined);assert.equal(model.safeMediaUrl('https://scontent.xx.fbcdn.net/a'),'https://scontent.xx.fbcdn.net/a');const a={creative:{object_story_spec:{link_data:{link:'javascript:alert(1)'}}}};assert.equal(model.destination(a),null);
 });
+test('CSV escapes formulas including whitespace-prefixed payloads and quotes',()=>{
+ for(const value of ['=SUM(1,2)','  =HYPERLINK("x")','+cmd','-cmd','@SUM(1)','\tvalue'])assert.ok(model.csvCell(value).startsWith('"\''));assert.equal(model.csvCell('Normal "copy"'),'"Normal ""copy"""');assert.equal(model.csvCell(null),'""');
+});
+test('ad-set and concept inventory is inspectable without delivery, with current ads attached',()=>{
+ const d=fixture();d.adsets=[{id:'10',name:'One',campaign_id:'20'},{id:'11',name:'No delivery',campaign_id:'20'}];d.ads.push({id:'3',name:'YOKE | New concept | v1',campaign_id:'20',adset_id:'11',effective_status:'PAUSED'});const sets=model.groups(d,'adset','view_content');assert.equal(sets.length,2);assert.equal(sets.find(s=>s.id==='11').metrics.spend,0);assert.deepEqual(sets.find(s=>s.id==='11').adIds,['3']);assert.ok(model.groups(d,'concept','view_content').some(c=>c.id==='New concept'));assert.equal(model.groups(d,'campaign','view_content').find(c=>c.id==='20').adIds.length,3);
+});
 test('pagination stays on the same account/query with header auth; ignores malicious next URLs',async()=>{
  const calls=[];const reader=graphReader(config,async(u,o)=>{calls.push({url:new URL(u),options:o});return calls.length===1?json({data:[1],paging:{next:'https://evil.test/?access_token=leak',cursors:{after:'cursor2'}}}):json({data:[2]});});assert.deepEqual(await reader.pages('act_123/ads',{fields:'id'}),[1,2]);assert.equal(calls[1].url.hostname,'graph.facebook.com');assert.equal(calls[1].url.searchParams.get('after'),'cursor2');assert.equal(calls[1].url.searchParams.get('fields'),'id');for(const c of calls){assert.equal(c.options.method,'GET');assert.equal(c.options.headers.Authorization,'Bearer secret-never-in-url');assert.ok(!c.url.href.includes(config.token));assert.equal(c.options.cache,'no-store');}
 });
