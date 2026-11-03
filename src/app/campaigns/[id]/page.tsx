@@ -28,19 +28,25 @@ export default function Campaign({ params }: { params: Promise<{ id: string }> }
       const d = await r.json(); if (!r.ok) throw new Error(d.message || 'Performance unavailable'); setPerformance(d);
     }).catch(e => { if (e.name !== 'AbortError') setError(e.message); }); return () => c.abort();
   },[id,groupBy,from,to,data?.state.revision]);
-  async function command(command: Record<string,unknown>) {
-    if (!data || busy) return; setBusy(true); setError('');
-    const request = pending.current || { key: crypto.randomUUID(), body: { expectedRevision: data.state.revision, command } }; pending.current = request;
+  async function command(command: Record<string,unknown>, expectedRevision = data?.state.revision): Promise<boolean> {
+    if (!data || busy) return false;
+    if (pending.current && JSON.stringify((pending.current.body as {command: unknown}).command) !== JSON.stringify(command)) {
+      setError('The previous command has an unknown outcome. Retry the same command unchanged before saving another edit.'); return false;
+    }
+    setBusy(true); setError('');
+    const request = pending.current || { key: crypto.randomUUID(), body: { expectedRevision, command } }; pending.current = request;
     try {
       const r = await fetch(`/api/campaigns/${encodeURIComponent(id)}/commands`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ...(request.body as object), requestKey:request.key }) });
       const result = await r.json();
       if (!r.ok) { if (r.status < 500) pending.current = null; throw new Error(result.message || 'Could not save'); }
-      pending.current = null; await load();
-    } catch(e) { setError(e instanceof Error ? e.message : 'Could not save'); } finally { setBusy(false); }
+      pending.current = null; setData(result);
+      try { await load(); } catch { setError('Saved, but the latest campaign details could not be refreshed. Reload to check for subsequent changes.'); }
+      return true;
+    } catch(e) { setError(e instanceof Error ? e.message : 'Could not save'); return false; } finally { setBusy(false); }
   }
   return <><Link href="/campaigns">← Campaigns</Link>
-    {error ? <p role="alert">{error} <button className="btn small" onClick={() => load().then(() => setError('')).catch(e => setError(e.message))}>Reload</button></p> : null}
-    {data ? <CampaignView state={data.state} memo={data.memo} fingerprint={data.fingerprint} canApprove={member?.role === 'admin' || member?.role === 'approver'} pending={busy} onCommand={command} audit={audit} performance={performance} closeout={closeout}
+    {error ? <p role="alert">{error} {pending.current ? <button className="btn small" disabled={busy} onClick={() => command((pending.current!.body as {command: Record<string,unknown>}).command)}>Retry previous command</button> : null} <button className="btn small" disabled={busy} onClick={() => load().then(() => setError(pending.current ? 'Latest campaign loaded. Retry the previous command to confirm its outcome before saving another edit.' : '')).catch(e => setError(e.message))}>Reload</button></p> : null}
+    {data ? <CampaignView key={data.state.id} state={data.state} memo={data.memo} fingerprint={data.fingerprint} canEdit={!!member && ['creator','approver','admin'].includes(member.role)} canApprove={member?.role === 'admin' || member?.role === 'approver'} pending={busy} onCommand={command} audit={audit} performance={performance} closeout={closeout}
       groupBy={groupBy} onGroupBy={setGroupBy} from={from} to={to} onFrom={setFrom} onTo={setTo} /> : !error ? <p role="status">Loading campaign…</p> : null}
   </>;
 }
