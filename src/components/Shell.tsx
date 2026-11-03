@@ -57,6 +57,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/" aria-current={lib ? 'page' : undefined}>Library{inbox.rows.length ? <span className="navcount" aria-label={`, ${inbox.rows.length} with feedback for you`}>{inbox.rows.length}</span> : null}</Link>
           <Link href="/create" aria-current={path.startsWith('/create') ? 'page' : undefined}>Create an ad</Link>
           <Link href="/campaigns" aria-current={path.startsWith('/campaigns') ? 'page' : undefined}>Campaigns</Link>
+          <Link href="/performance" aria-current={path.startsWith('/performance') ? 'page' : undefined}>Performance</Link>
         </nav>
         <AccountMenu member={member} email={email} />
       </div></header>
