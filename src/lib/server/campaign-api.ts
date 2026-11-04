@@ -6,6 +6,9 @@ import { PLAYBOOK_VERSION, commandSchema, type CampaignState } from '../campaign
 import { applyCommand, CampaignError, requireRole } from '../campaigns/workflow';
 import { auditPlan, report, closeout, type StoredBatch } from '../campaigns/reporting';
 import { playbook, capabilities, digest, deploymentPlan, memoMarkdown, planFingerprint } from '../campaigns/playbook';
+import { hostingConventions } from '../campaigns/hosting';
+import { emptyHostingBrief } from '../campaigns/hosting-contracts';
+import { hostingPacket, hostingAssetSearch } from './campaign-hosting';
 
 const idSchema = z.string().regex(/^yc_[a-f0-9]{24}$/);
 const envelope = z.object({ expectedRevision: z.number().int().nonnegative(), requestKey: z.string().min(8).max(120), command: commandSchema }).strict();
@@ -22,6 +25,13 @@ export async function handleCampaign(db: SupabaseClient, actor: Actor, method: s
 async function route(db: SupabaseClient, actor: Actor, method: string, path: string[], body: unknown, query: URLSearchParams): Promise<unknown> {
   if (!['viewer','creator','approver','admin'].includes(actor.role)) throw new ApiError(403, 'forbidden', 'Yoke membership required');
   const [id, action] = path;
+  if (id === 'hosting-assets' && method === 'GET') {
+    const q=z.string().max(100).parse(query.get('q') || '');
+    const format=z.enum(['square','feed45','vertical','landscape']).nullable().parse(query.get('format'));
+    return hostingAssetSearch(db,q,format,query.get('approvedOnly') !== 'false');
+  }
+  if (id === 'hosting-guide' && method === 'GET') return { conventions: hostingConventions, template: emptyHostingBrief(),
+    capabilities: { compile: true, save: true, externalExecution: false }, instructions: 'Save with save_preparation; compile with GET <campaign>/preparation. This does not create or activate platform campaigns.' };
   if (id === 'playbook' && method === 'GET') return { playbook, capabilities: capabilities() };
   if (id === 'due' && method === 'GET') {
     const rows = unwrap(await db.from('campaign_records').select('state').order('updated_at', { ascending: true }).limit(501)) || [];
@@ -45,6 +55,7 @@ async function route(db: SupabaseClient, actor: Actor, method: string, path: str
   const record: any = unwrap(await db.from('campaign_records').select('state').eq('id', id).maybeSingle());
   if (!record) throw new ApiError(404, 'not_found', 'Campaign not found');
   const state = record.state as CampaignState;
+  if (method === 'GET' && action === 'preparation') return hostingPacket(db,state);
   if (method === 'GET' && !action) return enrich(state);
   if (method === 'GET' && (action === 'events' || action === 'observations')) {
     const table = action === 'events' ? 'campaign_events' : 'campaign_observations';
