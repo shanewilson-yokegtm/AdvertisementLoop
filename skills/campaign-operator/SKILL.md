@@ -1,6 +1,6 @@
 ---
 name: campaign-operator
-description: Review, authorize, audit and close Yoke Meta or LinkedIn campaigns using exact approved launch plans. Market-test memo intake and hosting preparation use ad-hosting; individual creative production uses ad-builder.
+description: Authorize Yoke Meta or LinkedIn launch plans, audit observed platform delivery, and close campaign learning reviews. Starting or resuming market-test memos and retrieving hosting review packets, including read-only preparation, use ad-hosting; creative production uses ad-builder.
 ---
 
 # Yoke campaign operator

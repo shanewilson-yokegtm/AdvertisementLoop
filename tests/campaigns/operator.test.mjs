@@ -168,6 +168,10 @@ test('real Postgres + API: shared edits, exact assets, CAS, replay, imports and 
   await assert.rejects(send(viewer,8,'host-viewer-0001',{type:'save_preparation',preparation}),/creator/);
   const hosted=await send(creator,8,'host-save-0001',{type:'save_preparation',preparation});
   assert.equal(hosted.state.status,'draft');assert.equal(hosted.state.launch,null);
+  assert.equal(hosted.hostingPreparation.reviewPacket.readOnly,true);
+  assert.equal(hosted.hostingPreparation.reviewPacket.mutatesCampaign,false);
+  assert.equal(hosted.hostingPreparation.reviewPacket.computedOnDemand,true);
+  assert.equal(hosted.hostingPreparation.reviewPacket.revision,hosted.state.revision);
   assert.equal((await send(creator,8,'host-save-0001',{type:'save_preparation',preparation})).repeated,true);
   await assert.rejects(send(other,8,'host-stale-0001',{type:'save_preparation',preparation}),/changed/);
   const compiled=await api(viewer,'GET',[id,'preparation']);assert.equal(compiled.manifest.externalExecution,'not_performed');
@@ -175,6 +179,9 @@ test('real Postgres + API: shared edits, exact assets, CAS, replay, imports and 
   assert.equal((await api(viewer,'GET',[id,'preparation'])).manifest.manifestHash,compiled.manifest.manifestHash);
   const forbidden=await tools.get('campaign_hosting_save').fn({campaignId:id,expectedRevision:9,requestKey:'mcp-host-denied',preparation});assert.equal(forbidden.isError,true);
   const compiledTool=await tools.get('campaign_prepare').fn({campaignId:id});assert.equal(compiledTool.isError,undefined);
+  assert.equal(tools.get('campaign_prepare').cfg.annotations.readOnlyHint,true);
+  const afterCompile=await api(viewer,'GET',[id]);
+  assert.deepEqual(afterCompile.state,hosted.state,'read-only compilation must not change the saved campaign');
   const discovered=await api(viewer,'GET',['hosting-assets']);assert.equal(discovered.items[0].versionId,'fixture-asset_v1');
   await db.exec("update reviews set status='changes' where version_id='fixture-asset_v1'");
   const revoked=await api(viewer,'GET',[id,'preparation']);assert.notEqual(revoked.manifest.manifestHash,compiled.manifest.manifestHash);
