@@ -13,7 +13,11 @@ import { hostingPacket, hostingAssetSearch } from './campaign-hosting';
 const idSchema = z.string().regex(/^yc_[a-f0-9]{24}$/);
 const envelope = z.object({ expectedRevision: z.number().int().nonnegative(), requestKey: z.string().min(8).max(120), command: commandSchema }).strict();
 const unwrap = <T>(r: { data: T; error: any }): T => { if (r.error) throw dbError(r.error); return r.data; };
-const enrich = (s: CampaignState) => ({ state: s, fingerprint: planFingerprint(s), memo: s.brief ? memoMarkdown(s.brief) : null, deploymentPlan: deploymentPlan(s), capabilities: capabilities() });
+const enrich = (s: CampaignState) => ({ state: s, fingerprint: planFingerprint(s), memo: s.brief ? memoMarkdown(s.brief) : null, deploymentPlan: deploymentPlan(s), capabilities: capabilities(),
+  hostingPreparation: { saved: !!s.preparation, reviewPacket: s.preparation ? {
+    tool: 'campaign_prepare', method: 'GET', path: `/api/v1/campaigns/${s.id}/preparation`, revision: s.revision,
+    readOnly: true, mutatesCampaign: false, computedOnDemand: true,
+  } : null, note: 'Hosting review packets are computed on demand. An empty legacy memo or deploymentPlan does not mean the saved hosting preparation or its current review packet is missing.' } });
 export async function handleCampaign(db: SupabaseClient, actor: Actor, method: string, path: string[], body: unknown, query: URLSearchParams) {
   try { return await route(db, actor, method, path, body, query); }
   catch (e) {

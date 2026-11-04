@@ -1,13 +1,13 @@
 ---
 name: ad-hosting
-description: Prepare and review Yoke market-test campaigns in the shared Ad Studio hosting tool. Use for a campaign memo, clarifying decisions, exact asset assignments, labels, tracking exports and colleague handoff. Creative production belongs to ad-builder; platform publication belongs to the connected campaign executor.
+description: Start or resume Yoke ad-hosting market tests from a memo, and retrieve their current review packets, including read-only reviews. Covers campaign questions, exact assets, labels, tracking exports and handoff. Preparing or compiling a review packet is read-only; publishing ads belongs to the campaign executor.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # Ad hosting
 
-Package **1.0.1**. Help the person turn a market-test memo into a shared, reviewable campaign preparation packet. The hosted code computes names, joins, tracking, readiness and exports. Do not reproduce those algorithms in chat.
+Package **1.0.2**. Help the person turn a market-test memo into a shared, reviewable campaign preparation packet. The hosted code computes names, joins, tracking, readiness and exports. Do not reproduce those algorithms in chat.
 
 ## Connect and resume
 
@@ -31,7 +31,7 @@ Set `decisionsCurrent: true` after reconciling the typed decisions with the curr
 
 Call `campaign_hosting_save` with the preparation object, latest `expectedRevision`, and a fresh request key. Reuse that exact key/body only to recover the identical save after a lost response. On conflict, reload the shared record and reconcile intervening decisions; never force an overwrite. Viewer access is read-only. Hosting saves are limited to draft records.
 
-Call `campaign_prepare`. It batches Library checks and returns a manifest, consolidated issues, CSV and Markdown. Show preparation questions first, then launch-only checks, counts and selected versions. Use its labels and destinations exactly. `libraryCheckedAt` is the current observation time; the manifest hash covers the exact compiled evidence. Recompile after a review change or before handing the packet to a publisher.
+Call `campaign_prepare` even when the person requests read-only work: it is a GET, computes the current packet on demand, and never writes or persists a campaign. A packet need not be saved separately, and an empty legacy memo/deploymentPlan does not indicate missing hosting preparation. Do not substitute a hand-written packet or ask for write authorization to compile. It batches Library checks and returns a manifest, consolidated issues, CSV and Markdown. Show preparation questions first, then launch-only checks, counts and selected versions. Use its labels and destinations exactly. `libraryCheckedAt` is the current observation time; the manifest hash covers the exact compiled evidence. Recompile after a review change or before handing the packet to a publisher.
 
 Prefer the campaign's **Prepare** tab downloads for the returned manifest, analysis CSV and handoff Markdown. Create chat attachments only when requested; copying large tool results into commands adds latency and leaves stale attachments after revisions. Never recalculate the exports or fabricate hosted download URLs. Preserve `manifestHash`, `campaignId`, revision, compiler version and exact version IDs. A colleague should be able to resume using only the shared campaign ID and packet. Reviewing a hosting packet uses the saved preparation and `campaign_prepare`; use `campaign_audit` only when platform observations are actually relevant.
 

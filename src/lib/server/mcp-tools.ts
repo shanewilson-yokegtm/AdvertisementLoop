@@ -30,7 +30,7 @@ export function buildMcpServer(db: SupabaseClient, actor: Actor, appUrl: string,
       'Read brand_pack before writing copy. Owners (and Shane as admin) change their own ads; everyone can read and comment. ' +
       'Saving is not approval; final approval happens in the app. Never invent ids or links: report only what tools return. ' +
       'higgsfield_generate costs money and post_to_slack posts publicly: ask the person first, every time. ' +
-      'Campaign tools share the campaign memo and revision across teammates. Campaign approval and launch authorization are separate; firm execution adapters are not connected.',
+      'Campaign tools share the campaign memo and revision across teammates. Hosting preparation is separate from the legacy launch memo/deploymentPlan. campaign_prepare is a read-only GET that computes the current review packet without writing or persisting anything; use it even when the person says read-only. Campaign approval and launch authorization are separate; firm execution adapters are not connected.',
   });
   registerCampaignTools(s, db, actor);
   const reg = (name: string, cfg: { title: string; description: string; inputSchema?: z.ZodRawShape; annotations: Record<string, boolean> }, cb: (args: any) => Promise<unknown>) =>
