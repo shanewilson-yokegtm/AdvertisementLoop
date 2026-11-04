@@ -1,6 +1,6 @@
 {
   "name": "ad-hosting",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Prepare Yoke campaign memos, exact asset assignments, analysis labels and review packets in the shared Ad Studio. No platform execution or media generation.",
   "author": {
     "name": "Yoke GTM"

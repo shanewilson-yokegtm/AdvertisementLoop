@@ -33,6 +33,19 @@ test('same pinned inputs compile identically; title changes preserve analysis jo
   assert.equal(u.searchParams.get('ref'),'partner');assert.equal(u.hash,'#signup');assert.equal(u.searchParams.has('UTM_CONTENT'),false);
   assert.equal(u.searchParams.get('utm_content'),p.manifest.ads[0].adKey);
 });
+test('exported packet retains qualification and simulation authority without needing the original chat',()=>{
+  const b=fixture();
+  b.audienceDefinition='Personally builds GTM workflows; distinguish in-house from agency.';
+  b.memo='SIMULATION ONLY: no spending authority. Draft copy needs product-truth review.\nCompare upkeep with setup.';
+  const p=compileHosting(campaign,b,[fact]);
+  const exported=JSON.parse(JSON.stringify(p.manifest));
+  assert.equal(exported.audienceDefinition,b.audienceDefinition);
+  assert.equal(exported.memo,b.memo);
+  for(const value of [campaign.id,b.hypothesis,b.audienceDefinition,b.offer,b.primaryOutcome,b.memo,p.manifest.manifestHash])
+    assert.ok(p.markdown.includes(value),`Handoff omitted ${value}`);
+  assert.equal(exported.launchReady,false);
+  assert.equal(exported.externalExecution,'not_performed');
+});
 test('ads remain stable through ordering, and copy/media revisions get distinct deployment keys',()=>{
   const b=fixture();b.ads.push({...ad('upkeep_b'),variantKey:'alternate'});
   const p=compileHosting(campaign,b,[fact]);const reordered=compileHosting(campaign,{...b,ads:[...b.ads].reverse()},[fact]);

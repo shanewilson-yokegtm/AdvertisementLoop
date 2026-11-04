@@ -1,4 +1,4 @@
-# Hosting contract 1.0.0
+# Hosting contract 1.0.1
 
 Fetch `campaign_hosting_guide` for the current complete template and conventions. This package also includes `template.json` and `schema.json`, generated from the maintained TypeScript schema. Prefer the hosted guide if the versions differ. Do not silently use new fields against an older server.
 
