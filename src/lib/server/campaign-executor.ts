@@ -1,4 +1,4 @@
-// Server-only launch executor over the durable step ledger (migration 20261031001000_campaign_execution_ledger).
+// Server-only launch executor over the durable step ledger (migration 20261101152517_campaign_execution_ledger).
 // Not routed to any API, tool or schedule. `attempt_launch` stays blocked and `registeredAdapters` is empty, so in
 // production this module cannot reach a platform. Tests drive it with a fake adapter against local Postgres.
 //

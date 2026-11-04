@@ -6,7 +6,7 @@
 
 ## Campaign operator scaffold
 
-The campaign workflow adds conversation → approved memo → authorized execution → shared reporting → dated learning review. Start with [the Claude handoff](docs/campaigns/CLAUDE-HANDOFF.md) and [campaign skill](skills/campaign-operator/SKILL.md). `/campaigns` provides memo, execution, audit, performance and closeout views. Both platform adapters and scheduled work are unconnected; the schema migration is unapplied.
+The campaign workflow adds conversation → approved memo → authorized execution → shared reporting → dated learning review. Start with [the Claude handoff](docs/campaigns/CLAUDE-HANDOFF.md) and [campaign skill](skills/campaign-operator/SKILL.md). `/campaigns` provides memo, execution, audit, performance and closeout views. Both platform adapters and scheduled work are unconnected; the campaign schema was applied Nov 1, 2026 (see docs/campaigns/ACCOUNT-ACCESS.md).
 
 Run `npm run test:campaigns`, `npm run typecheck` and `npm run build`. Package the installable skill with `npm run package:campaign-skill`.
 

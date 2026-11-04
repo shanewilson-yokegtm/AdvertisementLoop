@@ -1,25 +1,49 @@
-# Campaign operator: account access and gated changes (discovered Oct 30, 2026)
+# Campaign operator: account access and gated changes (discovered Oct 30, 2026; released Nov 1, 2026)
 
-Read-only discovery from a Claude session. Nothing below was changed in production. Each gated change lists target, exact change, validation and rollback for Shane's approval.
+## Release record (Nov 1, 2026, approved by Shane)
 
-## What was observed
+| Step | Outcome |
+|---|---|
+| Pre-checks | PR #3 head `89e7ded`, base `6ab9273`; local SQL byte-identical to that head; production had 18 migrations, no `campaign_*` objects; all dependencies present. |
+| `apply_migration campaign_operator` | Success. Recorded version **`20261101152428`**. |
+| `apply_migration campaign_execution_ledger` | Success. Recorded version **`20261101152517`**. |
+| Schema validation | Six tables (`campaign_records`, `campaign_events`, `campaign_observations`, `campaign_metric_batches`, `campaign_execution_steps`, `campaign_execution_log`): RLS on, 2 policies each; `anon` no access; `authenticated` SELECT only; `service_role` writes. `campaign_commit`, `campaign_step_claim/complete/evidence/reconcile` and `app_private.campaign_launch_current` execute only as `service_role`. Triggers: `campaign_execution_fence` on records; `campaign_history_immutable` on events, observations, metric batches, log, steps. |
+| Behaviour check (rolled back) | `authenticated` denied `campaign_commit`; fence refused a launch change with an unknown step; step delete refused. Tables empty afterwards. |
+| Security advisor | No findings on campaign objects. Existing warnings unchanged (14 pre-existing SECURITY DEFINER RPCs callable by `authenticated`; leaked-password protection off). |
+| Merge | PR #3 marked ready and merged with expected head `89e7ded` as merge commit **`fb8809a`** (history preserved). |
+| Deploy | Project `advertisementloop` deployment `DmQCnYkF91r14xbuUmSnH1KMjJYe` (https://vercel.com/yoke-gtm/advertisementloop/DmQCnYkF91r14xbuUmSnH1KMjJYe): Ready, Production, Current; domain `advertisementloop-eight.vercel.app`; source `main` `fb8809a`; build 24 s (confirmed by the operator in the Vercel dashboard). Live bundle contains the new Campaigns nav link. Project `advertisement_loop` also reported success for `fb8809a` (deployment `EJwUp9sPcN7r4NgeXNKHkSQbSqe3`). |
+| Unauthenticated smoke | `/campaigns` → 307 to `/login?next=%2Fcampaigns`; `/api/campaigns/playbook`, `/api/v1/campaigns/playbook`, `/api/mcp` → 401; OAuth resource metadata 200; `/api/health` 200. |
+| Authenticated smoke | **Passed (read-only), verified by the operator** in an existing signed-in Chrome profile (Shane Wilson): production `/campaigns` shows the Campaigns heading, New campaign input, no campaigns yet, and Meta/LinkedIn awaiting firm connections; `/connect` shows the correct MCP URL and client with "Not connected yet". No client errors captured. Screenshot saved by the operator. Vercel runtime logs filtered to this deployment for the last 30 minutes surfaced no logs or errors; this is a limited observation, not comprehensive monitoring. Claude's built-in browser is a separate unsigned session; no sign-in email, token, or cookie import was used. |
+| MCP end-to-end | **Pending: workspace-owner enablement.** In Claude Customize > Connectors > Yours, Yoke Ad Studio is absent, and Add connector > Add custom connector is disabled; this account has no Organization settings. A workspace owner must enable/add the custom connector before anyone can do the personal OAuth sign-in and confirm the nine `campaign_*` tools. This is not an app login problem. Guide: https://support.claude.com/en/articles/11176164-use-connectors-to-extend-claude-s-capabilities |
+| `/api/health` `claude: false` | Not a connector flag. `src/app/api/health/route.ts` sets `configured.claude` from `ANTHROPIC_API_KEY`. It does not reflect MCP/OAuth connection state, and this skill/connector does not need a model API key. |
+| Not changed | Optional `app_private.mcp_oauth_config` RLS fix (change 2) not applied — outside this approval. |
+
+Local migration files were renamed to the recorded versions in a separate metadata-only change; no SQL was replayed and Supabase migration history was not edited.
+
+
+## Historical: Oct 30 discovery (superseded where noted)
+
+Read-only discovery from a Claude session on Oct 30, before the release. Rows describing `main`, the hosted tools and migrations reflect that date and are superseded by the Nov 1 release record above.
+
+### What was observed (Oct 30)
 
 | Area | Observed | Status |
 |---|---|---|
-| Production app | `advertisementloop-eight.vercel.app`, `main` = `6ab9273`. `/api/health`: Supabase, Slack, Higgsfield configured; `claude: false`. | Live |
-| Hosted MCP + OAuth | `/api/mcp` returns 401 with `WWW-Authenticate` pointing at `/.well-known/oauth-protected-resource/api/mcp`, which names Supabase Auth `uevktzprbpymfcquotmb` as the authorization server. One OAuth client registered. | Endpoint live. Tool discovery after sign-in not verified (needs a person to complete OAuth in Claude). Campaign tools are not on `main`, so the hosted server does not expose them yet. |
-| Supabase migrations | Production has 18 migrations through `20261030161111_claude_revisions`. No `campaign_*` tables. All functions the campaign migration depends on exist (`app_private.is_server`, `role_of`, `role_rank`, `role_at_least`). | `20261030233954_campaign_operator` unapplied; dependencies satisfied. |
+| Production app | Oct 30: `main` = `6ab9273`. `/api/health`: Supabase, Slack, Higgsfield configured; `claude: false` (means no `ANTHROPIC_API_KEY`; see release record). | Superseded: `main` = `fb8809a` since Nov 1. |
+| Hosted MCP + OAuth | `/api/mcp` returns 401 with `WWW-Authenticate` pointing at `/.well-known/oauth-protected-resource/api/mcp`, which names Supabase Auth `uevktzprbpymfcquotmb` as the authorization server. One OAuth client registered. | Oct 30: campaign tools were not on `main`. Superseded: deployed Nov 1; end-to-end discovery pending workspace-owner connector enablement (release record). |
+| Supabase migrations | Oct 30: production had 18 migrations through `20261030161111_claude_revisions`; no `campaign_*` tables; dependencies present. | Superseded: both campaign migrations applied Nov 1 (release record above). |
 | Supabase advisor | `app_private.mcp_oauth_config` has RLS disabled. `anon`/`authenticated` have no SELECT on it and it holds only the public client id. | Low practical risk; fix recommended (below). |
 | Meta | Claude connector "Meta ads AI" is installed but `connect_incomplete`. No Meta tools available in the session. | Blocked: needs Shane to finish the connection. Ad account ID, Business Manager role, pixel/dataset and page identity unverified. |
 | LinkedIn | No LinkedIn Ads connector installed or found in the registry. | Blocked: needs a decision on access path (LinkedIn Marketing API app with server-held token, or browser-based execution). |
-| Waitlist outcome source | Limited search only: HubSpot portal "Yoke" (22312186, America/Vancouver, USD) is connected and has UTM properties (`utm_campaign___original/latest`, `hs_analytics_source`). A keyword search of contact properties did not surface a GTME waitlist property; forms, lists, other object types and other systems were not checked. The Webflow connector exposes only a "HeyStack" site. This does not show the source is absent. | Unidentified: Shane needs to name the authoritative waitlist record (form/property/table/system). |
+| Waitlist outcome source | Nov 1 (independent read-only Codex discovery): HubSpot portal 22312186 confirmed. Form-name searches for waitlist/GTM/Yoke returned 7 waitlist forms, all for other products or legacy, and no GTM form. Segment-name searches for waitlist/GTME/GTM/early/Yoke did not identify a GTME waitlist either. No contact data or submissions were exported, and no source was selected. This still does not show the source is absent. Oct 30: limited search only: HubSpot portal "Yoke" (22312186, America/Vancouver, USD) is connected and has UTM properties (`utm_campaign___original/latest`, `hs_analytics_source`). A keyword search of contact properties did not surface a GTME waitlist property; forms, lists, other object types and other systems were not checked. The Webflow connector exposes only a "HeyStack" site. This does not show the source is absent. | Unidentified: Shane needs to name the authoritative waitlist record (form/property/table/system). |
 | Skill package | `npm run package:campaign-skill` reproduces the committed `skills/campaign-operator.zip` content exactly. `campaign-operator` v1 was installed and enabled via Claude Customize in Shane's personal account (Oct 30). | Personal install only. Not published to the org; teammates do not have it. Its campaign tools work only after the code is deployed and the connector exposes them. |
 
-## Gated changes (prepared, not applied)
+## Gated changes (prepared Oct 30; 1 and 3 done Nov 1, 2 not applied)
 
 ### 1. Apply the campaign migrations
 - **Target:** Supabase `uevktzprbpymfcquotmb`.
-- **Change:** two `apply_migration` calls, in order: `supabase/migrations/20261030233954_campaign_operator.sql` (name `campaign_operator`), then `supabase/migrations/20261031001000_campaign_execution_ledger.sql` (name `campaign_execution_ledger`). Rename each local file to the version Supabase records. The ledger adds tables and server-only functions only; nothing calls them in the deployed app.
+- **Done Nov 1:** recorded as `20261101152428_campaign_operator` and `20261101152517_campaign_execution_ledger` (local files now use these names; originally `20261030233954_…` and `20261031001000_…`).
+- **Change:** two `apply_migration` calls, in order: `campaign_operator`, then `campaign_execution_ledger`. Rename each local file to the version Supabase records. The ledger adds tables and server-only functions only; nothing calls them in the deployed app.
 - **Order:** apply before merging/deploying this branch to `main` (the app code expects the tables and `campaign_commit` RPC).
 - **Validate:** `list_tables` shows the four `campaign_*` tables plus `campaign_execution_steps` and `campaign_execution_log`, all with RLS on; `get_advisors` (security, performance) adds no new findings; `has_table_privilege('anon','public.campaign_records','SELECT')` is false; `has_function_privilege('authenticated', …)` is false for `campaign_commit`, `campaign_step_claim`, `campaign_step_complete`, `campaign_step_evidence` and `campaign_step_reconcile`; trigger `campaign_execution_fence` exists on `campaign_records`.
 - **Rollback:** prefer a forward fix. While the new tables are still empty (`select count(*)` on each is 0), a reviewed follow-up migration can drop the new functions and tables (ledger objects first, then `campaign_*`). Once any campaign, event, import or ledger row exists, do not drop: those rows are the audit trail. Instead revert the app code (change 3) and leave the schema in place, or export the rows before any reviewed removal. Do not edit Supabase's recorded migration history by hand.

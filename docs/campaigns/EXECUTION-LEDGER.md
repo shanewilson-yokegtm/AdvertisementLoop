@@ -1,6 +1,6 @@
 # Execution ledger and launch rehearsal
 
-Status: implemented and tested locally. Migration `20261031001000_campaign_execution_ledger.sql` is unapplied. No adapter is registered, nothing routes to the executor, and `attempt_launch` still records a blocker. No network or account call exists in this code path.
+Status: released Nov 1, 2026. Migration `20261101152517_campaign_execution_ledger.sql` is applied in production (empty tables). No adapter is registered, nothing routes to the executor, and `attempt_launch` still records a blocker. No network or account call exists in this code path.
 
 ## What it guarantees
 
@@ -21,7 +21,7 @@ Real PGlite with all migrations, the real API and executor, an in-memory fake pl
 ## Remaining limits before live use
 
 Code and schema
-1. The ledger migration is unapplied. Nothing calls `executeLaunch`; `attempt_launch` stays blocked.
+1. The ledger schema is live but unused: nothing calls `executeLaunch`; `attempt_launch` stays blocked.
 2. **Worker.** A server-only worker or route, its service authentication, lease sizing (lease must exceed the step timeout) and the `attempt_launch` hand-off need building and Shane's review.
 3. **Closeout scheduler.** `GET /campaigns/due` is a query only; no scheduler runs closeout reviews.
 4. **Resolution UI.** `unknown` and partial outcomes wait for a person; there is no tool or screen to resolve them yet.
