@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "memo": "Describe the market test here.",
+  "decisionsCurrent": false,
+  "initiativeKey": null,
+  "campaignKey": null,
+  "productKey": "yoke",
+  "channel": null,
+  "hypothesis": null,
+  "audienceKey": null,
+  "audienceDefinition": null,
+  "offer": null,
+  "primaryOutcome": null,
+  "countries": [],
+  "destination": null,
+  "budget": null,
+  "timezone": null,
+  "startsAt": null,
+  "spendEndsAt": null,
+  "analyzeAfter": null,
+  "requiredFormats": [
+    "feed45",
+    "vertical"
+  ],
+  "experiment": null,
+  "ads": []
+}

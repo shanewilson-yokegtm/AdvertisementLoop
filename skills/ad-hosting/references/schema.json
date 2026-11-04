@@ -1,0 +1,480 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "memo": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000
+    },
+    "decisionsCurrent": {
+      "type": "boolean"
+    },
+    "initiativeKey": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,39}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "campaignKey": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,39}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "productKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,39}$"
+    },
+    "channel": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "meta",
+            "linkedin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hypothesis": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "audienceKey": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,39}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "audienceDefinition": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "offer": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "primaryOutcome": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,39}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "countries": {
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]{2}$"
+      }
+    },
+    "destination": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^https:\\/\\/"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "budget": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "enum": [
+                "CAD",
+                "USD",
+                "EUR",
+                "GBP"
+              ]
+            },
+            "amountMinor": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000000
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "daily",
+                "lifetime"
+              ]
+            },
+            "ceilingMinor": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "currency",
+            "amountMinor",
+            "type",
+            "ceilingMinor"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timezone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startsAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "spendEndsAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "analyzeAfter": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requiredFormats": {
+      "minItems": 1,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "square",
+          "feed45",
+          "vertical",
+          "landscape"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "experiment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "creative_comparison",
+                "landing_page"
+              ]
+            },
+            "allocation": {
+              "type": "string",
+              "enum": [
+                "platform_optimized",
+                "randomized_router",
+                "native_experiment"
+              ]
+            },
+            "arms": {
+              "minItems": 1,
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{1,39}$"
+                  },
+                  "destination": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^https:\\/\\/"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "weight": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "key",
+                  "destination",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "assignmentEvidenceRef": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "allocation",
+            "arms",
+            "assignmentEvidenceRef"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ads": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$"
+          },
+          "conceptKey": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$"
+          },
+          "variantKey": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$"
+          },
+          "armKey": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,39}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "static",
+              "motion"
+            ]
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "included",
+              "excluded"
+            ]
+          },
+          "primaryText": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cta": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "renditions": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "square",
+                    "feed45",
+                    "vertical",
+                    "landscape"
+                  ]
+                },
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{3,120}$"
+                },
+                "versionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{3,120}$"
+                }
+              },
+              "required": [
+                "format",
+                "assetId",
+                "versionId"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "key",
+          "conceptKey",
+          "variantKey",
+          "armKey",
+          "kind",
+          "disposition",
+          "primaryText",
+          "headline",
+          "cta",
+          "renditions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "memo",
+    "decisionsCurrent",
+    "initiativeKey",
+    "campaignKey",
+    "productKey",
+    "channel",
+    "hypothesis",
+    "audienceKey",
+    "audienceDefinition",
+    "offer",
+    "primaryOutcome",
+    "countries",
+    "destination",
+    "budget",
+    "timezone",
+    "startsAt",
+    "spendEndsAt",
+    "analyzeAfter",
+    "requiredFormats",
+    "experiment",
+    "ads"
+  ],
+  "additionalProperties": false,
+  "$comment": "Structural schema only. The maintained Zod schema additionally enforces unique formats/keys, allocation totals, date order, IANA timezone, URL credentials and budget ceilings. Hosted validation is authoritative."
+}

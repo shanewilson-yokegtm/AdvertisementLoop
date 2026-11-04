@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PLAYBOOK_VERSION, type Actor, type CampaignState, type Command } from './contracts';
 import { capabilities, planFingerprint } from './playbook';
+import { assertHostingContinuity } from './hosting';
 
 export class CampaignError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -14,6 +15,12 @@ export function applyCommand(current: CampaignState, command: Command, actor: Ac
   if (current.status === 'closed') throw new CampaignError(409, 'closed', 'This campaign is closed. Start a new campaign for another round.');
   const state = structuredClone(current);
   const fingerprint = planFingerprint(current);
+  if (command.type === 'save_preparation') {
+    if (current.status !== 'draft') throw new CampaignError(409, 'preparation_locked', 'Prepare in a draft campaign. Approved or authorized launch plans stay separate.');
+    try { assertHostingContinuity(current.preparation, command.preparation); }
+    catch (e) { throw new CampaignError(409, 'identity_conflict', (e as Error).message); }
+    state.preparation = command.preparation;
+  }
   if (command.type === 'save_notes') state.planningNotes = command.notes;
   if (command.type === 'save_brief') {
     state.brief = command.brief; state.title = command.brief.title;

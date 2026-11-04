@@ -13,6 +13,7 @@ export function pgClient(db) {
       update(row) { st.op = 'update'; st.row = row; return b; },
       upsert(row) { st.op = 'upsert'; st.row = row; return b; },
       eq(k, v) { st.where.push(`${col(k)} = ${q(v)}`); return b; },
+      ilike(k, v) { st.where.push(`${col(k)} ilike ${q(v)}`); return b; },
       is(k, v) { st.where.push(`${col(k)} is ${q(v)}`); return b; },
       in(k, vs) { st.where.push(`${col(k)} in (${vs.map(q).join(',')})`); return b; },
       gte(k, v) { st.where.push(`${col(k)} >= ${q(v)}`); return b; },

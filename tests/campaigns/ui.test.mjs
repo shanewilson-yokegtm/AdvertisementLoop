@@ -1,19 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { load } from './load.mjs';
 
-const rootDir=path.resolve(import.meta.dirname,'../..'); const require=createRequire(import.meta.url);
-const file=path.join(rootDir,'src/components/campaigns/CampaignView.tsx');
-const code=ts.transpileModule(readFileSync(file,'utf8'),{fileName:file,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-const module={exports:{}};new Function('require','module','exports',code)(require,module,module.exports);
-const CampaignView=module.exports.default;
+const rootDir=path.resolve(import.meta.dirname,'../..');
+const CampaignView=load('src/components/campaigns/CampaignView.tsx').default;
 const brief=JSON.parse(readFileSync(path.join(import.meta.dirname,'brief.fixture.json')));
 const props={state:{id:'yc_123456789012345678901234',title:'GTME waitlist campaign',revision:2,status:'draft',playbookVersion:'yoke-campaigns-v1',planningNotes:'Confirm agency qualification and final offer.',brief,approval:null,launch:null},
   memo:'# GTME waitlist campaign\n\nPurpose: Recruit practitioners who personally build GTM workflows.\n\nHypothesis: A concrete workflow demonstration can earn qualified waitlist signups.\n\nAudience: In-house GTME and equivalent technical practitioners.\n\nChannels: Meta and LinkedIn.\n\nBudget, timing and qualification remain campaign decisions.',fingerprint:'fixture-fingerprint',canApprove:true,pending:false,onCommand:()=>{},audit:{items:[]},performance:{state:'unavailable',rows:[],detail:[],caveats:['No live source is connected.']},closeout:{status:'not_due',unproven:['The maturity window has not ended.']},groupBy:'concept',onGroupBy:()=>{},from:'',to:'',onFrom:()=>{},onTo:()=>{}};

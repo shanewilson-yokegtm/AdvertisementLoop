@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { hostingBriefSchema, type HostingBrief } from './hosting-contracts';
 
 export const PLAYBOOK_VERSION = 'yoke-campaigns-v1';
 const text = z.string().trim().min(1).max(2000);
@@ -58,6 +59,7 @@ export type CampaignState = {
   schemaVersion: 1; id: string; ownerId: string; title: string; revision: number;
   status: 'draft' | 'approved' | 'launch_authorized' | 'launch_blocked' | 'closed';
   playbookVersion: string; planningNotes: string; brief: Brief | null; approval: Approval | null; launch: Launch | null;
+  preparation?: HostingBrief | null;
 };
 const counts = z.number().int().nonnegative();
 export const metricRowSchema = z.object({
@@ -89,6 +91,7 @@ export const observationSchema = z.object({
 }).strict().refine(x => x.settings.channel === x.channel && x.settings.accountId === x.accountId, 'Observation account/channel mismatch');
 export type Observation = z.infer<typeof observationSchema>;
 export const commandSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('save_preparation'), preparation: hostingBriefSchema }).strict(),
   z.object({ type: z.literal('save_notes'), notes: z.string().max(12000) }).strict(),
   z.object({ type: z.literal('save_brief'), brief: briefSchema }).strict(),
   z.object({ type: z.literal('approve'), fingerprint: text }).strict(),

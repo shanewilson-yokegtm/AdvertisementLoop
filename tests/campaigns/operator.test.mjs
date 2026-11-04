@@ -156,8 +156,28 @@ test('real Postgres + API: shared edits, exact assets, CAS, replay, imports and 
   assert.equal(race.filter(r=>r.status==='rejected').length,1);
   const tools=new Map(); const {registerCampaignTools}=load('src/lib/campaigns/mcp.ts');
   registerCampaignTools({registerTool:(name,cfg,fn)=>tools.set(name,{cfg,fn})},client,viewer);
-  assert.equal(tools.size,9);
+  assert.equal(tools.size,13);
   const reply=await tools.get('campaign_report').fn({campaignId:id}); assert.equal(reply.isError,undefined);
   const denied=await tools.get('campaign_create').fn({title:'No',requestKey:'viewer-mcp-0001'}); assert.equal(denied.isError,true);
+  // Hosting is a draft preparation workflow; it reuses the real service-only CAS/event store, not launch permission.
+  const {emptyHostingBrief}=load('src/lib/campaigns/hosting-contracts.ts');
+  const preparation={...emptyHostingBrief('Test workflow messaging.'),requiredFormats:['square'],ads:[{
+    key:'workflow_static',conceptKey:'workflow_relief',variantKey:'original',kind:'static',disposition:'included',
+    primaryText:'Fixture only',headline:'Workflow relief',cta:'Learn more',
+    renditions:[{format:'square',assetId:'fixture-asset',versionId:'fixture-asset_v1'}]}]};
+  await assert.rejects(send(viewer,8,'host-viewer-0001',{type:'save_preparation',preparation}),/creator/);
+  const hosted=await send(creator,8,'host-save-0001',{type:'save_preparation',preparation});
+  assert.equal(hosted.state.status,'draft');assert.equal(hosted.state.launch,null);
+  assert.equal((await send(creator,8,'host-save-0001',{type:'save_preparation',preparation})).repeated,true);
+  await assert.rejects(send(other,8,'host-stale-0001',{type:'save_preparation',preparation}),/changed/);
+  const compiled=await api(viewer,'GET',[id,'preparation']);assert.equal(compiled.manifest.externalExecution,'not_performed');
+  assert.equal(compiled.manifest.ads[0].media[0].libraryStatus,'approved');
+  assert.equal((await api(viewer,'GET',[id,'preparation'])).manifest.manifestHash,compiled.manifest.manifestHash);
+  const forbidden=await tools.get('campaign_hosting_save').fn({campaignId:id,expectedRevision:9,requestKey:'mcp-host-denied',preparation});assert.equal(forbidden.isError,true);
+  const compiledTool=await tools.get('campaign_prepare').fn({campaignId:id});assert.equal(compiledTool.isError,undefined);
+  const discovered=await api(viewer,'GET',['hosting-assets']);assert.equal(discovered.items[0].versionId,'fixture-asset_v1');
+  await db.exec("update reviews set status='changes' where version_id='fixture-asset_v1'");
+  const revoked=await api(viewer,'GET',[id,'preparation']);assert.notEqual(revoked.manifest.manifestHash,compiled.manifest.manifestHash);
+  assert.ok(revoked.manifest.issues.some(i=>i.id.endsWith('.approval')));
   await db.close();
 });

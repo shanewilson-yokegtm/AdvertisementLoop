@@ -1,9 +1,11 @@
 ---
 name: campaign-operator
-description: Plan a Yoke Meta or LinkedIn campaign through conversation, save a shared one-page memo, execute an explicitly authorized plan through connected campaign tools, and prepare the campaign learning review. Use when someone wants to start, resume, launch, audit or close a campaign; individual ad creation stays with ad-builder.
+description: Review, authorize, audit and close Yoke Meta or LinkedIn campaigns using exact approved launch plans. Market-test memo intake and hosting preparation use ad-hosting; individual creative production uses ad-builder.
 ---
 
 # Yoke campaign operator
+
+For a semantic market-test memo, asset assignment, naming or review-only handoff, use ad-hosting and its maintained hosting API first. If that skill is absent, read the saved preparation through campaign_get/campaign_prepare and report missing hosting capabilities. A hosting packet is not a launch brief or spending authority; the future connected adapter must explicitly translate and verify its exact versions, labels, experiment and tracking. Do not silently launch from preparation data or rename historical/live objects. This operator's legacy launch contract and approvals remain unchanged.
 
 Carry this process through: conversation → approved one-page memo → “go, launch it” → consistent execution → integrated reporting → dated learning review.
 

@@ -13,7 +13,9 @@
     "test:campaigns": "node --test tests/campaigns/*.test.mjs",
     "test:performance": "node --test tests/performance/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "package:campaign-skill": "python3 scripts/package-campaign-skill.py"
+    "package:campaign-skill": "python3 scripts/package-campaign-skill.py",
+    "package:hosting-skill": "python3 scripts/package-hosting-skill.py",
+    "hosting:guide": "node scripts/campaign-hosting.mjs guide"
   },
   "dependencies": {
     "@higgsfield/client": "^0.2.6",

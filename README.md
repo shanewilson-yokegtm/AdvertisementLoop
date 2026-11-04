@@ -1,5 +1,9 @@
 # Yoke Ad Studio (AdvertisementLoop)
 
+## Campaign hosting
+
+The **Prepare** tab turns a market-test memo into a shared review packet: exact Library versions, consistent campaign/ad/asset labels, stable analysis keys, tracked destinations, consolidated questions, CSV and a colleague handoff. The deterministic operations live in repository code and are exposed by the existing personal API/MCP. Preparation does not create or activate platform campaigns. See [hosting operations and org publication](docs/campaigns/HOSTING.md). Build the standalone Claude skill/plugin with `npm run package:hosting-skill`; AdBuilder can later consume the same versioned manifest.
+
 ## Account performance
 
 **Performance** (`/performance`) is the integrated Meta account dashboard: flexible dates, previous-period comparisons, daily trends, publisher platforms, campaigns, ad sets, provisional concepts, creative previews and observed settings. It reads one server-configured account using `ads_read`; it cannot change ads. Existing member sign-in is required. See [reporting setup and measurement contract](docs/PERFORMANCE.md). Run `npm run test:performance` for reporting and access checks.

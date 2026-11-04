@@ -6,9 +6,10 @@ import type { Actor } from '../server/api';
 import { commandSchema } from './contracts';
 import { handleCampaign } from '../server/campaign-api';
 import { ApiError } from '../server/api';
+import { hostingBriefSchema } from './hosting-contracts';
 
 type Registry = { registerTool: (name: string, config: any, callback: (args: any) => Promise<any>) => unknown };
-export const CAMPAIGN_TOOL_NAMES = ['campaign_playbook','campaign_list','campaign_create','campaign_get','campaign_command','campaign_audit','campaign_report','campaign_closeout','campaign_due'] as const;
+export const CAMPAIGN_TOOL_NAMES = ['campaign_playbook','campaign_list','campaign_create','campaign_get','campaign_command','campaign_audit','campaign_report','campaign_closeout','campaign_due','campaign_hosting_guide','campaign_hosting_save','campaign_prepare','campaign_asset_search'] as const;
 export function registerCampaignTools(server: Registry, db: SupabaseClient, actor: Actor) {
   const id = z.string().regex(/^yc_[a-f0-9]{24}$/);
   const reg = (name: string, description: string, schema: z.ZodRawShape, write: boolean, route: (a: any) => { method: string; path: string[]; body?: unknown; query?: Record<string,string> }) => {
@@ -22,6 +23,15 @@ export function registerCampaignTools(server: Registry, db: SupabaseClient, acto
     });
   };
   reg('campaign_playbook','Read campaign defaults, required evidence and actual connection status.',{},false,()=>({method:'GET',path:['playbook']}));
+  reg('campaign_hosting_guide','Hosting skill v1: naming conventions, preparation template and actual hosting capabilities. No platform execution.',{},false,()=>({method:'GET',path:['hosting-guide']}));
+  reg('campaign_asset_search','Find Library assets by concept name, format and approval. Returns exact latest version IDs and readiness, with truncation explicit. Use get_ad for older versions.',
+    {query:z.string().max(100).optional(),format:z.enum(['square','feed45','vertical','landscape']).optional(),approvedOnly:z.boolean().optional()},false,
+    a=>({method:'GET',path:['hosting-assets'],query:{q:a.query||'',...(a.format?{format:a.format}:{}),approvedOnly:String(a.approvedOnly ?? true)}}));
+  reg('campaign_hosting_save','Save a hosting-only preparation brief in a draft campaign. Missing decisions are null. Preserves stable identities, revision checks and retries. Does not approve, launch or reject assets.',
+    {campaignId:id,expectedRevision:z.number().int().nonnegative(),requestKey:z.string().min(8).max(120),preparation:hostingBriefSchema},true,
+    a=>({method:'POST',path:[a.campaignId,'commands'],body:{expectedRevision:a.expectedRevision,requestKey:a.requestKey,command:{type:'save_preparation',preparation:a.preparation}}}));
+  reg('campaign_prepare','Compile the current hosting brief and exact Library versions into a deterministic manifest, questions, tracking, CSV and Markdown handoff. Read-only: no platform work or spend. libraryCheckedAt is the observation time, outside the stable manifest hash.',
+    {campaignId:id},false,a=>({method:'GET',path:[a.campaignId,'preparation']}));
   reg('campaign_list','List shared campaigns. A creator can resume another teammate’s campaign; revisions prevent overwrite.',{},false,()=>({method:'GET',path:[]}));
   reg('campaign_create','Create a shared campaign. Reuse the request key when recovering a lost response.',{title:z.string().min(1).max(150),requestKey:z.string().min(8).max(120)},true,a=>({method:'POST',path:[],body:a}));
   reg('campaign_get','Get current memo, revision, fingerprint and exact channel deployment plans.',{campaignId:id},false,a=>({method:'GET',path:[a.campaignId]}));

@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import type { CampaignState } from '@/lib/campaigns/contracts';
+import HostingPanel from './HostingPanel';
 
 type Props = { state: CampaignState; memo: string | null; fingerprint: string; canApprove: boolean; canEdit?: boolean;
   pending: boolean; onCommand: (command: Record<string, unknown>, expectedRevision?: number) => Promise<boolean> | void; audit: any; performance: any; closeout: any;
@@ -18,7 +19,8 @@ export default function CampaignView(p: Props) {
     <div className="head"><div><h1>{s.title}</h1><p className="muted">Revision {s.revision} · {s.playbookVersion} · <span className="chip">{pretty(s.status)}</span></p></div>
       <button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(`Use the Yoke campaign-operator skill to continue campaign ${s.id}. Read the shared record first. Help me reach an approved one-page campaign memo.`); setCopied(true); } catch { setCopied(false); window.alert(`Continue campaign ${s.id} with the campaign-operator skill in Claude.`); } }}>{copied ? 'Prompt copied' : 'Continue in Claude'}</button>
     </div>
-    <nav className="tabs" aria-label="Campaign views">{['Memo','Execution','Audit','Performance','Closeout'].map(t => <button key={t} aria-pressed={view === t} onClick={() => setView(t)}>{t}</button>)}</nav>
+    <nav className="tabs" aria-label="Campaign views">{['Memo','Prepare','Execution','Audit','Performance','Closeout'].map(t => <button key={t} aria-pressed={view === t} onClick={() => setView(t)}>{t}</button>)}</nav>
+    {view === 'Prepare' ? <HostingPanel state={s} canEdit={!!p.canEdit} pending={p.pending} onCommand={p.onCommand}/> : null}
     {view === 'Memo' ? <>
       <p>Everyone works from this saved memo and revision. Continue planning here or in Claude.</p>
       {p.memo ? <div className="campaign-memo">{p.memo.split('\n').filter(Boolean).map((line,i) => <p key={i}>{line.replace(/^#+\s*/, '').replaceAll('**','')}</p>)}</div> : <p>No complete memo yet. Save the current decisions and asset links in planning notes while audience, budget, timing or measurement remain open.</p>}
