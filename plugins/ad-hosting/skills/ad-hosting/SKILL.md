@@ -2,12 +2,12 @@
 name: ad-hosting
 description: Prepare and review Yoke market-test campaigns in the shared Ad Studio hosting tool. Use for a campaign memo, clarifying decisions, exact asset assignments, labels, tracking exports and colleague handoff. Creative production belongs to ad-builder; platform publication belongs to the connected campaign executor.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Ad hosting
 
-Package **1.0.0**. Help the person turn a market-test memo into a shared, reviewable campaign preparation packet. The hosted code computes names, joins, tracking, readiness and exports. Do not reproduce those algorithms in chat.
+Package **1.0.1**. Help the person turn a market-test memo into a shared, reviewable campaign preparation packet. The hosted code computes names, joins, tracking, readiness and exports. Do not reproduce those algorithms in chat.
 
 ## Connect and resume
 
@@ -21,7 +21,7 @@ Start with what the person wants to learn. Retrieve the existing plan and select
 
 Capture hypothesis, intended audience/qualification, offer, outcome, market, budget/currency, timing, test design, exact concepts/versions and required rendition formats. Use `campaign_asset_search` to find approved candidates by concept/name and format, and `get_ad` for their actual version history. Narrow the search when hasMore is true. Pin returned exact version IDs; never use “latest” or invent an ID. If tools are absent, ask for asset references only after disclosing that Library discovery is unavailable. If media is missing, retain that gap and prepare the rest. Do not generate or adapt media during this workflow; hand the specific asset request to ad-builder.
 
-For a landing-page comparison, capture arms, weights, entry destination and allocation method. Distinguish ordinary platform optimization from random assignment. Missing routing evidence remains a launch check. The compiler does not implement a router.
+For a landing-page comparison, capture arms, weights, entry destination and allocation method. Distinguish ordinary platform optimization from random assignment. Under platform optimization, arm weights are planning values: do not describe them as an actual 50/50 spend, audience or exposure split. Missing routing evidence remains a launch check. The compiler does not implement a router.
 
 Choose short analysis keys deliberately. Unresolved initiativeKey, campaignKey and channel stay null; they become fixed at their first deliberate selection, not when an incomplete memo is saved. Prefer existing initiative and concept keys for the same meaning. Each ad's concept/variant identity becomes fixed. Use a new ad key for a different concept or variant; preserve old entries with `disposition: excluded`. Excluding an ad here never rejects or archives its Library media. Assign ad armKey for a multi-arm creative comparison or native experiment; randomized page routing assigns the page arm after the click. Read [the contract](references/contract.md) for identity, currency and format details.
 
@@ -33,7 +33,7 @@ Call `campaign_hosting_save` with the preparation object, latest `expectedRevisi
 
 Call `campaign_prepare`. It batches Library checks and returns a manifest, consolidated issues, CSV and Markdown. Show preparation questions first, then launch-only checks, counts and selected versions. Use its labels and destinations exactly. `libraryCheckedAt` is the current observation time; the manifest hash covers the exact compiled evidence. Recompile after a review change or before handing the packet to a publisher.
 
-Deliver the returned manifest, analysis CSV and handoff Markdown as files using the client's normal file-writing facilities, or direct the person to the campaign's **Prepare** tab downloads. Do not fabricate hosted download URLs. Preserve `manifestHash`, `campaignId`, revision, compiler version and exact version IDs. A colleague should be able to resume using only the shared campaign ID and packet.
+Prefer the campaign's **Prepare** tab downloads for the returned manifest, analysis CSV and handoff Markdown. Create chat attachments only when requested; copying large tool results into commands adds latency and leaves stale attachments after revisions. Never recalculate the exports or fabricate hosted download URLs. Preserve `manifestHash`, `campaignId`, revision, compiler version and exact version IDs. A colleague should be able to resume using only the shared campaign ID and packet. Reviewing a hosting packet uses the saved preparation and `campaign_prepare`; use `campaign_audit` only when platform observations are actually relevant.
 
 “Ready for review” does not mean approved, uploaded, attached, verified or live. This hosting slice cannot execute platform operations. If the person asks to publish, carry their exact intent and manifest to the connected execution workflow; do not call the legacy `attempt_launch` or improvise browser account changes. AdBuilder integration is a later consumer of this same contract.
 

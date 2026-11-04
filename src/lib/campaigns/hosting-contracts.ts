@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-export const HOSTING_VERSION = '1.0.0';
+export const HOSTING_VERSION = '1.0.1';
 export const analysisKey = z.string().regex(/^[a-z][a-z0-9_]{1,39}$/, 'Use a lowercase analysis key: letters, numbers and underscores, 2–40 characters');
 const text = z.string().trim().min(1).max(2000);
 const id = z.string().regex(/^[A-Za-z0-9_-]{3,120}$/);

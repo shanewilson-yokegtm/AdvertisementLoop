@@ -1,4 +1,6 @@
-# Campaign hosting 1.0.0
+# Campaign hosting 1.0.1
+
+The review exports retain the source memo, audience qualification and explicit campaign ID. Platform-optimized arm weights describe planning intent, not delivered spend or exposure. Prefer Prepare-tab downloads so chat attachments do not become stale after revisions.
 
 This release adds a preparation workflow to Ad Studio: memo → resolved decisions → exact Library selections → deterministic review packet. It does not depend on AdBuilder, Meta execution, new credentials, paid rendering or a database migration. The existing campaign JSON/event store holds `state.preparation`; old campaign and launch records remain compatible.
 
@@ -60,11 +62,11 @@ The JSON Schema distributed with the skill covers structural validation. The ser
 
 ## Org publication packet
 
-The org admin can publish **ad-hosting 1.0.0** using `skills/ad-hosting.zip`, or the equivalent `plugins/ad-hosting-plugin.zip` if using the workspace plugin catalog. They are alternative packaging routes for the same entrypoint; do not install both under competing copies. Publish the revised campaign-operator package if that older skill is distributed, so its discovery description routes memo preparation to ad-hosting. AdBuilder is unchanged.
+The org admin can publish **ad-hosting 1.0.1** using `skills/ad-hosting.zip`, or the equivalent `plugins/ad-hosting-plugin.zip` if using the workspace plugin catalog. They are alternative packaging routes for the same entrypoint; do not install both under competing copies. Publish the revised campaign-operator package if that older skill is distributed, so its discovery description routes memo preparation to ad-hosting. AdBuilder is unchanged.
 
 One consolidated admin request:
 
-> Please publish the attached **ad-hosting 1.0.0** skill to our Claude workspace. It prepares market-test memos, selects Library versions, and generates campaign labels, tracking, CSV and handoffs through Yoke Ad Studio. Please also replace the older campaign-operator package if it is shared, so memo preparation routes to ad-hosting. Use the existing Yoke Ad Studio connector and each member's own sign-in; no new Meta/Higgsfield access or backend keys are needed for hosting. The application release must expose campaign_hosting_guide, campaign_asset_search, campaign_hosting_save and campaign_prepare before we call it operational.
+> Please publish the attached **ad-hosting 1.0.1** skill to our Claude workspace. It prepares market-test memos, selects Library versions, and generates campaign labels, tracking, CSV and handoffs through Yoke Ad Studio. Please also replace the older campaign-operator package if it is shared, so memo preparation routes to ad-hosting. Use the existing Yoke Ad Studio connector and each member's own sign-in; no new Meta/Higgsfield access or backend keys are needed for hosting. The application release must expose campaign_hosting_guide, campaign_asset_search, campaign_hosting_save and campaign_prepare before we call it operational.
 
 After application deployment, test in a fresh personal Claude chat:
 
